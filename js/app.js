@@ -2,13 +2,15 @@
 // template.js; this file just renders and routes events.
 
 import { deck as calc1 } from './decks/calc1.js';
+import { deck as techniques } from './decks/techniques.js';
 import * as fsrs from './fsrs.js';
-import { draw, fill, check, referenceText, validate } from './template.js';
+import { draw, fill, check, referenceText, validate, renderCloze, isProse } from './template.js';
 import { load, save, exportJSON, importJSON, defaultState, dayOf, streak } from './store.js';
 import { Session, buildQueue, gradeFor } from './session.js';
 import { randomSeed } from './rng.js';
+import { confetti } from './fx.js';
 
-const SEED_DECKS = [calc1];
+const SEED_DECKS = [calc1, techniques];
 const $ = id => document.getElementById(id);
 const DAY = 86400000;
 
@@ -88,8 +90,15 @@ window.addEventListener('hashchange', route);
 
 function renderStreak() {
   const n = streak(state.logs, Date.now());
-  $('streak-chip').hidden = n === 0;
+  const chip = $('streak-chip');
+  const grew = !chip.hidden && Number($('streak-n').textContent) !== n;
+  chip.hidden = n === 0;
   $('streak-n').textContent = n;
+  if (grew || (n > 0 && chip.hidden === false)) {
+    chip.classList.remove('streak-pop');
+    void chip.offsetWidth;
+    chip.classList.add('streak-pop');
+  }
 }
 
 function renderIdle() {
@@ -101,9 +110,11 @@ function renderIdle() {
   $('n-due').textContent = due.length;
   $('n-new').textContent = fresh.length;
   const none = due.length + fresh.length === 0;
+  const seen = Object.values(state.templates).some(e => !e.suspended && !fsrs.isNew(e.srs));
   $('start-btn').disabled = none;
+  $('lock-btn').disabled = none && !seen;
   $('hero-line').textContent = none
-    ? 'Nothing due. Go live your life.'
+    ? (seen ? 'Nothing due. Lock in anyway, or go live your life.' : 'Nothing due. Go live your life.')
     : due.length === 0 ? 'All caught up. New material today.'
     : 'Ready when you are.';
 
@@ -140,19 +151,41 @@ const ui = {
   ok: false,
   grade: 3,
   practice: false,
+  lockUntil: 0,
+  lockTicker: 0,
 };
 
-function startSession() {
+function startSession(lockMins = 0) {
   session = new Session(state, Date.now());
+  ui.lockUntil = lockMins ? Date.now() + lockMins * 60000 : 0;
+  if (!session.remaining && ui.lockUntil) session.refill(Date.now());
   if (!session.remaining) return;
   $('today-idle').hidden = true;
   $('today-done').hidden = true;
   $('today-session').hidden = false;
+  const chip = $('lock-chip');
+  chip.hidden = !ui.lockUntil;
+  clearInterval(ui.lockTicker);
+  if (ui.lockUntil) {
+    const tick = () => {
+      const left = Math.max(0, ui.lockUntil - Date.now());
+      const m = Math.floor(left / 60000), s = Math.floor(left / 1000) % 60;
+      chip.textContent = `${m}:${String(s).padStart(2, '0')}`;
+      chip.classList.toggle('low', left < 60000);
+    };
+    tick();
+    ui.lockTicker = setInterval(tick, 1000);
+  }
   showCard();
 }
 
 function showCard() {
-  const item = session.current;
+  if (ui.lockUntil && Date.now() >= ui.lockUntil) return endSession();
+  let item = session.current;
+  if (!item && ui.lockUntil && Date.now() < ui.lockUntil) {
+    session.refill(Date.now());
+    item = session.current;
+  }
   if (!item) return endSession();
   const e = item.entry;
   const tpl = e.tpl;
@@ -188,11 +221,14 @@ function showCard() {
   if (ui.practice) {
     const t = document.createElement('span');
     t.className = 'tag practice-tag';
-    t.textContent = 'until it sticks';
+    t.textContent = item.extra ? 'bonus round' : 'until it sticks';
     meta.appendChild(t);
   }
 
-  $('prompt').innerHTML = mathHTML(fill(tpl.prompt, ui.drawn));
+  const filled = fill(tpl.prompt, ui.drawn);
+  $('prompt').innerHTML = tpl.answer.type === 'cloze'
+    ? mathHTML(renderCloze(filled, ui.drawn._cloze))
+    : mathHTML(filled);
   $('parse-note').textContent = '';
   $('hint-text').textContent = '';
   $('hint-btn').disabled = !(tpl.hints && tpl.hints.length);
@@ -202,7 +238,7 @@ function showCard() {
   const area = $('answer-area');
   area.innerHTML = '';
   const a = tpl.answer;
-  if (a.type === 'number' || a.type === 'expression') {
+  if (a.type === 'number' || a.type === 'expression' || a.type === 'text' || a.type === 'cloze') {
     const row = document.createElement('div');
     row.className = 'answer-row';
     const input = document.createElement('input');
@@ -210,9 +246,12 @@ function showCard() {
     input.id = 'answer-input';
     input.autocomplete = 'off';
     input.spellcheck = false;
-    input.placeholder = a.type === 'expression'
-      ? (a.upToConstant ? 'your answer (the + C is optional)' : 'your answer, e.g. 3x^2')
-      : 'your answer, e.g. 1/2 or 0.5';
+    input.placeholder =
+      a.type === 'cloze' ? 'the missing part'
+      : a.type === 'text' ? 'your answer'
+      : a.type === 'expression'
+        ? (a.upToConstant ? 'your answer (the + C is optional)' : 'your answer, e.g. 3x^2')
+        : 'your answer, e.g. 1/2 or 0.5';
     const btn = document.createElement('button');
     btn.className = 'plain';
     btn.textContent = 'check';
@@ -326,8 +365,10 @@ function finishAnswer(ok) {
 
   let solution = '';
   const ref = referenceText(tpl, ui.drawn);
-  if (ref && tpl.answer.type !== 'choice') {
-    solution += `<p>Answer: ${mathInline(ref)}</p>`;
+  if (ref && tpl.answer.type !== 'choice' && tpl.answer.type !== 'self') {
+    solution += isProse(tpl)
+      ? `<p>Answer: <b>${esc(ref)}</b></p>`
+      : `<p>Answer: ${mathInline(ref)}</p>`;
   }
   if (tpl.solution) solution += mathHTML(fill(tpl.solution, ui.drawn));
   $('solution').innerHTML = solution;
@@ -366,15 +407,25 @@ function nextCard() {
 
 function endSession() {
   clearInterval(ui.timerId);
+  clearInterval(ui.lockTicker);
+  $('lock-chip').hidden = true;
+  const locked = ui.lockUntil
+    ? Math.round((Math.min(Date.now(), ui.lockUntil) - session.startedAt) / 60000)
+    : 0;
+  ui.lockUntil = 0;
   const s = session.summary();
+  const practiced = session.results.filter(r => r.practice).length;
   session = null;
   persist();
   renderStreak();
-  if (!s.graded) { renderIdle(); return; }
+  if (!s.graded && !practiced) { renderIdle(); return; }
   $('today-session').hidden = true;
   $('today-done').hidden = false;
-  $('done-line').innerHTML =
-    `<b>${s.right}</b> of <b>${s.graded}</b> right &nbsp;·&nbsp; ${s.minutes.toFixed(1)} min`;
+  const bits = [`<b>${s.right}</b> of <b>${s.graded}</b> right`];
+  if (practiced) bits.push(`${practiced} practice`);
+  bits.push(locked ? `locked in ${locked} min` : `${s.minutes.toFixed(1)} min`);
+  $('done-line').innerHTML = bits.join(' &nbsp;·&nbsp; ');
+  confetti(s.graded >= 10 ? 1.4 : 1);
   const list = $('done-skills');
   list.innerHTML = '';
   const rows = Object.entries(s.bySkill).sort((a, b) => a[1].right / a[1].total - b[1].right / b[1].total);
@@ -386,7 +437,8 @@ function endSession() {
   }
 }
 
-$('start-btn').addEventListener('click', startSession);
+$('start-btn').addEventListener('click', () => startSession(0));
+$('lock-btn').addEventListener('click', () => startSession(Number($('lock-mins').value)));
 $('back-btn').addEventListener('click', renderIdle);
 $('next-btn').addEventListener('click', nextCard);
 $('hint-btn').addEventListener('click', () => {
@@ -586,13 +638,24 @@ $('ed-save').addEventListener('click', () => {
 // ---------- import / export ----------
 
 let fileMode = 'deck';
-$('import-btn').addEventListener('click', () => { fileMode = 'deck'; $('file-input').click(); });
-$('import-all-btn').addEventListener('click', () => { fileMode = 'all'; $('file-input').click(); });
+function pickFile(mode, accept) {
+  fileMode = mode;
+  $('file-input').setAttribute('accept', accept);
+  $('file-input').click();
+}
+$('import-btn').addEventListener('click', () => pickFile('deck', 'application/json'));
+$('import-all-btn').addEventListener('click', () => pickFile('all', 'application/json'));
+$('notes-file-btn').addEventListener('click', () => pickFile('notes', '.txt,.md,text/plain,text/markdown'));
 $('file-input').addEventListener('change', async ev => {
   const file = ev.target.files[0];
   ev.target.value = '';
   if (!file) return;
   const text = await file.text();
+  if (fileMode === 'notes') {
+    $('notes-text').value = text;
+    toast(`loaded ${file.name}`);
+    return;
+  }
   try {
     if (fileMode === 'all') {
       if (!confirm('Replace everything with this export?')) return;
@@ -640,7 +703,9 @@ $('export-deck-btn').addEventListener('click', () => {
   download('studyflex-deck.json', JSON.stringify({ id: 'shared', name: 'shared deck', templates }, null, 1));
 });
 $('export-all-btn').addEventListener('click', () => {
-  download(`studyflex-backup-${dayOf(Date.now())}.json`, exportJSON(state));
+  // backups travel between machines; the API key stays in this browser
+  const clean = { ...state, settings: { ...state.settings, apiKey: undefined } };
+  download(`studyflex-backup-${dayOf(Date.now())}.json`, exportJSON(clean));
 });
 $('wipe-btn').addEventListener('click', () => {
   if (!confirm('Erase every card, edit, and review? Exports are the only way back.')) return;
@@ -648,6 +713,158 @@ $('wipe-btn').addEventListener('click', () => {
   persist();
   route();
   toast('wiped');
+});
+
+// ---------- add from notes ----------
+
+function notesSkills() {
+  const raw = $('notes-skills').value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  return raw.length ? raw : ['notes'];
+}
+
+function saveTemplates(templates) {
+  let added = 0;
+  const problems = [];
+  for (const tpl of templates) {
+    const bad = validate(tpl);
+    if (bad.length) { problems.push(`${tpl.name}: ${bad[0]}`); continue; }
+    state.templates[tpl.id] = {
+      tpl, deckId: 'notes', custom: true, suspended: false, srs: fsrs.newState(),
+    };
+    added++;
+  }
+  if (added) persist();
+  return { added, problems };
+}
+
+$('notes-btn').addEventListener('click', () => {
+  $('notes-panel').hidden = !$('notes-panel').hidden;
+});
+
+$('notes-mark-btn').addEventListener('click', () => {
+  const ta = $('notes-text');
+  const { selectionStart: a, selectionEnd: b, value } = ta;
+  if (a === b) { toast('select the words to hide first'); return; }
+  ta.value = `${value.slice(0, a)}[[${value.slice(a, b)}]]${value.slice(b)}`;
+  ta.focus();
+  ta.setSelectionRange(a, b + 4);
+});
+
+$('notes-make-btn').addEventListener('click', () => {
+  const lines = $('notes-text').value.split('\n').map(s => s.trim());
+  const marked = lines.filter(l => /\[\[.+?\]\]/.test(l));
+  if (!marked.length) { toast('no [[marked]] lines yet: select words and mark them'); return; }
+  const skills = notesSkills();
+  const templates = marked.map(line => ({
+    id: `notes/${line.replace(/\[\[|\]\]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}-${Date.now().toString(36)}`,
+    name: line.replace(/\[\[|\]\]/g, '').slice(0, 60),
+    skills,
+    par: 30,
+    prompt: line,
+    params: {},
+    answer: { type: 'cloze' },
+  }));
+  const { added, problems } = saveTemplates(templates);
+  toast(added ? `made ${added} cloze cards` : `no cards: ${problems[0] || 'nothing valid'}`);
+  renderCards();
+});
+
+$('qa-kind').addEventListener('change', () => {
+  const explain = $('qa-kind').value === 'explain';
+  $('qa-back').placeholder = explain
+    ? 'the model answer you will compare against'
+    : 'helicase (commas separate accepted answers)';
+});
+
+$('qa-add').addEventListener('click', () => {
+  const kind = $('qa-kind').value;
+  const front = $('qa-front').value.trim();
+  const back = $('qa-back').value.trim();
+  if (!front || !back) { toast('fill in both boxes'); return; }
+  const tpl = {
+    id: `notes/${front.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}-${Date.now().toString(36)}`,
+    name: front.slice(0, 60),
+    skills: notesSkills(),
+    par: kind === 'explain' ? 90 : 25,
+    prompt: front,
+    params: {},
+    answer: kind === 'explain'
+      ? { type: 'self' }
+      : { type: 'text', accept: back.split(',').map(s => s.trim()).filter(Boolean) },
+    ...(kind === 'explain' ? { solution: back } : {}),
+  };
+  const { added, problems } = saveTemplates([tpl]);
+  if (added) {
+    $('qa-front').value = '';
+    $('qa-back').value = '';
+    toast('card added');
+    renderCards();
+  } else toast(problems[0] || 'could not add that card');
+});
+
+// ---------- AI drafting ----------
+
+let aiProposals = [];
+
+function renderProposals() {
+  const list = $('ai-list');
+  list.innerHTML = '';
+  $('ai-actions').hidden = !aiProposals.length;
+  aiProposals.forEach((tpl, i) => {
+    const row = document.createElement('label');
+    row.className = 'ai-card';
+    const preview = tpl.answer.type === 'cloze'
+      ? esc(tpl.prompt).replace(/\[\[(.+?)\]\]/g, '<b>$1</b>')
+      : esc(tpl.prompt);
+    row.innerHTML = `
+      <input type="checkbox" checked data-i="${i}">
+      <span class="body">
+        <span class="kind">${tpl.answer.type === 'text' ? 'typed answer' : tpl.answer.type === 'cloze' ? 'cloze' : 'explain back'} · ${esc(tpl.skills.join(', '))}</span>
+        <div class="preview">${preview}</div>
+      </span>`;
+    list.appendChild(row);
+  });
+}
+
+$('notes-ai-btn').addEventListener('click', async () => {
+  const notes = $('notes-text').value.trim();
+  if (notes.length < 40) { toast('paste some notes first'); return; }
+  if (!state.settings.apiKey) {
+    $('ai-status').textContent = 'add your Anthropic API key under stats first; it stays in this browser.';
+    return;
+  }
+  const btn = $('notes-ai-btn');
+  btn.disabled = true;
+  $('ai-status').textContent = 'drafting cards...';
+  try {
+    const { draftCards } = await import('./ai.js');
+    aiProposals = await draftCards(notes, state.settings.apiKey);
+    $('ai-status').textContent = aiProposals.length
+      ? `${aiProposals.length} drafts. uncheck any you don't want, then add.`
+      : 'the model found nothing card-worthy in that paste.';
+    renderProposals();
+  } catch (e) {
+    $('ai-status').textContent = `drafting failed: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('ai-accept').addEventListener('click', () => {
+  const keep = [...$('ai-list').querySelectorAll('input:checked')]
+    .map(cb => aiProposals[Number(cb.dataset.i)]);
+  const { added, problems } = saveTemplates(keep);
+  aiProposals = [];
+  renderProposals();
+  $('ai-status').textContent = problems.length ? `skipped ${problems.length}: ${problems[0]}` : '';
+  toast(`added ${added} cards`);
+  renderCards();
+});
+
+$('ai-clear').addEventListener('click', () => {
+  aiProposals = [];
+  renderProposals();
+  $('ai-status').textContent = '';
 });
 
 // ---------- skills ----------
@@ -746,7 +963,14 @@ function renderStats() {
 
   $('set-new').value = state.settings.newPerDay;
   $('set-ret').value = String(state.settings.retention);
+  $('set-key').value = state.settings.apiKey || '';
 }
+
+$('set-key').addEventListener('change', () => {
+  state.settings.apiKey = $('set-key').value.trim();
+  persist();
+  toast(state.settings.apiKey ? 'key saved in this browser only' : 'key removed');
+});
 
 $('set-new').addEventListener('change', () => {
   state.settings.newPerDay = Math.max(0, Number($('set-new').value) || 0);

@@ -380,6 +380,55 @@ canvas.chart { width: 100%; height: 150px; display: block; }
 .settings-row label { display: block; font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.3rem; }
 .danger { color: var(--again); }
 
+/* ---------- lock in ---------- */
+
+.start-row { display: flex; gap: 0.7rem; justify-content: center; align-items: center; flex-wrap: wrap; }
+.lock-group { display: inline-flex; }
+.lock-group button { border-radius: 8px 0 0 8px; border-right: none; }
+.lock-group select { border-radius: 0 8px 8px 0; font-size: 0.82rem; }
+.lock-note { max-width: 46ch; margin: 0.9rem auto 0; }
+.session-top { display: flex; gap: 0.8rem; align-items: center; margin-bottom: 1rem; }
+.session-top .progress { flex: 1; margin-bottom: 0; }
+.lock-chip { font-variant-numeric: tabular-nums; }
+.lock-chip.low { color: var(--hard); border-color: var(--hard); }
+
+/* ---------- notes and quick add ---------- */
+
+.quick-add { display: grid; gap: 0.5rem; }
+.quick-add input, .quick-add select { width: 100%; }
+.quick-add button { justify-self: start; }
+.ai-card {
+  display: flex; gap: 0.7rem; align-items: baseline;
+  border: 1px solid var(--hairline); border-radius: 10px;
+  padding: 0.6rem 0.8rem; margin-top: 0.5rem;
+  background: var(--paper);
+}
+.ai-card .body { min-width: 0; }
+.ai-card .kind { font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.ai-card .preview { font-size: 0.95rem; margin-top: 0.15rem; overflow-wrap: break-word; }
+.ai-card .preview b { color: var(--accent); }
+
+/* ---------- micro-interactions ---------- */
+
+button.primary, button.plain, button.ghost, .grade, .choices button {
+  transition: transform 0.12s ease, border-color 0.15s, background 0.15s, color 0.15s;
+}
+button.primary:active, button.plain:active, .grade:active, .choices button:active { transform: scale(0.96); }
+.grade.on { transform: scale(1.06); }
+.answer-row input { transition: border-color 0.15s, background 0.2s; }
+.answer-row input.right { animation: settle 0.35s ease; }
+@keyframes settle {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.015); }
+  100% { transform: scale(1); }
+}
+.streak-pop { animation: pop 0.5s ease; }
+@keyframes pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
 /* ---------- toast ---------- */
 
 #toast {

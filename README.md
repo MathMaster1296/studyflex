@@ -14,9 +14,11 @@ it. This one is built around the two reasons that happened.
 Regular flashcards fail at math in a specific way: after the third review of
 "integrate x·e^(2x)" you are recalling the answer string, not doing
 integration by parts. Here that card is a generator. Next time it comes up as
-x·e^(5x), and the only way through is the method. The seed deck is
-single-variable calculus: 22 generators covering derivatives, integrals,
-limits, and the exact trig values everyone forgets.
+x·e^(5x), and the only way through is the method. Prose subjects get the same
+treatment: a cloze card can hold several marked spans and hides a different
+one each review, so the sentence never becomes a fixed prompt with a fixed
+answer. Two decks ship built in: 22 calculus generators, and a deck that
+teaches the study techniques the app is built on, through the app itself.
 
 The second failure is grading yourself. "Was that easy or good?" is a
 negotiation, and the lazy answer compounds into a schedule built on wishful
@@ -40,6 +42,26 @@ sees one grade per card per day; a card you miss comes back a few problems
 later until it sticks, and those practice reps never touch memory state. The
 skills page shows the model's current recall probability per skill, weakest
 first, which is the list to read the week before an exam.
+
+## Locking in
+
+The lock in button puts a clock on the session: 15, 25, or 50 minutes.
+Reviews run as normal, and when the due queue runs dry with time left, the
+app pulls your weakest material back in as practice until the timer ends.
+Practice reps never touch the schedule; they are just reps. Landing a session
+earns a small storm of confetti, which is not backed by any study on
+motivation, but neither is most homework.
+
+## Getting your notes in
+
+The cards page has an "add from notes" flow. Paste notes or load a text
+file, select the words worth remembering, and every marked line becomes a
+cloze card in one click; a quick-add form covers question-and-answer and
+explain-back cards. If you put an Anthropic API key in settings, a draft
+button sends the paste to Claude, which proposes cards you approve one by
+one before anything is saved. The key and your notes stay between your
+browser and Anthropic; there is no server of mine in the middle, because
+there is no server of mine at all.
 
 ## Writing cards
 
@@ -86,6 +108,9 @@ date), the session queue, and deck integrity: every shipped card is drawn
 | `js/session.js` | review queue, measured grading, requeue-until-it-sticks |
 | `js/store.js` | localStorage persistence, streaks, export and import |
 | `js/decks/calc1.js` | the calculus seed deck |
+| `js/decks/techniques.js` | the how-to-study seed deck |
+| `js/ai.js` | drafting cards from notes with Claude, loaded only on use |
+| `js/fx.js` | confetti |
 | `js/app.js` | page wiring |
 | `test/test.mjs` | the whole suite, no dependencies |
 

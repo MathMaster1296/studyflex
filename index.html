@@ -38,7 +38,18 @@
     <div class="panel today-hero">
       <h1 id="hero-line">Ready when you are.</h1>
       <p class="counts"><b id="n-due">0</b> due &nbsp;·&nbsp; <b id="n-new">0</b> new</p>
-      <button class="primary" id="start-btn">start reviewing</button>
+      <div class="start-row">
+        <button class="primary" id="start-btn">start reviewing</button>
+        <span class="lock-group">
+          <button class="plain" id="lock-btn">lock in</button>
+          <select id="lock-mins" title="minutes on the clock">
+            <option value="15">15m</option>
+            <option value="25" selected>25m</option>
+            <option value="50">50m</option>
+          </select>
+        </span>
+      </div>
+      <p class="fine lock-note">lock in keeps going past your due cards: when the queue runs dry, your weakest material comes back for practice until the clock runs out</p>
       <div class="load-bars" id="load-bars" title="reviews coming due over the next two weeks"></div>
       <p class="fine load-caption">the next two weeks</p>
     </div>
@@ -66,7 +77,10 @@
 
   <div id="today-session" hidden>
     <div class="review">
-      <div class="progress"><i id="progress-bar"></i></div>
+      <div class="session-top">
+        <div class="progress"><i id="progress-bar"></i></div>
+        <span class="chip lock-chip" id="lock-chip" hidden>25:00</span>
+      </div>
       <div class="panel review-card" id="review-card">
         <div class="review-meta" id="review-meta"></div>
         <div class="prompt" id="prompt"></div>
@@ -106,11 +120,49 @@
 
 <section id="view-cards" hidden>
   <div class="toolbar">
-    <button class="primary" id="new-card-btn">new card</button>
+    <button class="primary" id="notes-btn">add from notes</button>
+    <button class="plain" id="new-card-btn">new card</button>
     <button class="plain" id="import-btn">import deck</button>
     <button class="plain" id="export-deck-btn">export my cards</button>
     <span class="spacer"></span>
     <span class="fine" id="card-count"></span>
+  </div>
+
+  <div class="panel" id="notes-panel" hidden>
+    <p class="eyebrow">add from notes</p>
+    <div class="editor-grid">
+      <div>
+        <label for="notes-text">paste your notes &nbsp;<span class="fine" style="text-transform:none;letter-spacing:0">or drop in a .txt / .md file</span></label>
+        <textarea id="notes-text" rows="10" placeholder="Paste lecture notes, a summary sheet, definitions, anything."></textarea>
+        <p style="margin: 0.6rem 0 0;">
+          <button class="plain" id="notes-file-btn">load a file</button>
+          <button class="plain" id="notes-mark-btn" title="wrap the selected words in [[ ]]">mark selection</button>
+          <button class="plain" id="notes-make-btn" title="every line with [[marks]] becomes one cloze card">cards from marked lines</button>
+          <button class="plain" id="notes-ai-btn">draft cards with AI</button>
+        </p>
+        <label for="notes-skills">skill tags for these cards</label>
+        <input type="text" id="notes-skills" placeholder="bio: cell respiration">
+        <p class="fine">select the words worth remembering, mark them, then make cards. the app hides a different mark each review. AI drafting reads the whole paste and proposes cards for you to approve; it needs your API key in stats, and your notes go only to Anthropic.</p>
+      </div>
+      <div>
+        <label>quick add one card</label>
+        <div class="quick-add">
+          <select id="qa-kind">
+            <option value="term">question with a short typed answer</option>
+            <option value="explain">explain-back, graded by you</option>
+          </select>
+          <input type="text" id="qa-front" placeholder="What enzyme unzips DNA?">
+          <input type="text" id="qa-back" placeholder="helicase (commas separate accepted answers)">
+          <button class="plain" id="qa-add">add card</button>
+        </div>
+        <div id="ai-status" class="fine" style="margin-top:1rem"></div>
+        <div id="ai-list"></div>
+        <p id="ai-actions" hidden style="margin-top:0.8rem">
+          <button class="primary" id="ai-accept">add checked cards</button>
+          <button class="plain" id="ai-clear">discard</button>
+        </p>
+      </div>
+    </div>
   </div>
   <div class="panel" id="editor" hidden>
     <p class="eyebrow" id="editor-title">new card</p>
@@ -218,6 +270,10 @@
           <option value="0.93">0.93</option>
           <option value="0.95">0.95 exam mode</option>
         </select>
+      </div>
+      <div>
+        <label for="set-key">anthropic api key, for drafting cards from notes</label>
+        <input type="password" id="set-key" placeholder="sk-ant-..." autocomplete="off">
       </div>
       <div><button class="plain" id="export-all-btn">export everything</button></div>
       <div><button class="plain" id="import-all-btn">restore from export</button></div>
