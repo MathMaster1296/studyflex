@@ -6,10 +6,11 @@
 import { parse, evaluate, evalIn, equivalent, stripConstant } from '../js/expr.js';
 import * as fsrs from '../js/fsrs.js';
 import { rng } from '../js/rng.js';
-import { draw, fill, check, validate } from '../js/template.js';
+import { draw, fill, check, validate, textMatch, clozeSpans, renderCloze } from '../js/template.js';
 import { defaultState, load, streak, dayOf } from '../js/store.js';
 import { buildQueue, gradeFor, Session } from '../js/session.js';
 import { deck as calc1 } from '../js/decks/calc1.js';
+import { deck as techniques } from '../js/decks/techniques.js';
 
 let passed = 0, failed = 0;
 function ok(cond, name) {
@@ -128,17 +129,49 @@ ok(equivalent('a/cos(a*x)^2', 'a*sec(a*x)^2', { vars: ['x'], env: { a: 3 }, doma
   ok(!check(trig, tp, '1/2').ok, 'wrong trig value rejected');
 }
 
+// ---------- prose cards ----------
+
+ok(textMatch('Helicase', ['helicase']), 'text match is case-insensitive');
+ok(textMatch('  spaced repetition. ', ['Spaced Repetition']), 'punctuation and spacing ignored');
+ok(textMatch('helicse', ['helicase']), 'one typo allowed on longer answers');
+ok(textMatch('retreival', ['retrieval']), 'swapped letters count as one typo');
+ok(!textMatch('polymerase', ['helicase']), 'wrong word rejected');
+ok(!textMatch('cat', ['car']), 'no typo slack on short answers');
+ok(!textMatch('', ['anything']), 'empty input rejected');
+
+{
+  const text = 'The [[spacing]] effect beats [[cramming]] every time.';
+  const spans = clozeSpans(text);
+  ok(spans.length === 2 && spans[0] === 'spacing', 'cloze spans parse');
+  ok(renderCloze(text, 0) === 'The ______ effect beats cramming every time.', 'chosen span hides, others show');
+  ok(renderCloze(text, 1).includes('spacing') && renderCloze(text, 1).includes('______'), 'other span hides on other draws');
+
+  const card = techniques.templates.find(t => t.id === 'techniques/spacing-effect');
+  const p = draw(card, 3);
+  ok(Number.isInteger(p._cloze) && p._cloze >= 0 && p._cloze < clozeSpans(card.prompt).length, 'cloze draw picks a span');
+  const hidden = clozeSpans(card.prompt)[p._cloze];
+  ok(check(card, p, hidden).ok, 'typing the hidden span is correct');
+  ok(check(card, p, hidden.toUpperCase()).ok, 'case does not matter');
+  ok(!check(card, p, 'wrong entirely').ok, 'wrong span rejected');
+
+  const term = techniques.templates.find(t => t.id === 'techniques/testing-effect');
+  ok(check(term, draw(term, 1), 'active recall').ok, 'any accepted phrasing works');
+  ok(!check(term, draw(term, 1), 'rereading').ok, 'wrong technique rejected');
+}
+
 // ---------- deck integrity ----------
 
-for (const tpl of calc1.templates) {
-  const problems = validate(tpl);
-  ok(problems.length === 0, `deck card ${tpl.id}: ${problems.join('; ')}`);
-  ok((tpl.hints || []).length > 0, `deck card ${tpl.id} has a hint`);
-  ok((tpl.solution || '').length > 0, `deck card ${tpl.id} has a solution`);
-  ok(tpl.par >= 10 && tpl.par <= 300, `deck card ${tpl.id} par time is sane`);
+for (const deck of [calc1, techniques]) {
+  for (const tpl of deck.templates) {
+    const problems = validate(tpl);
+    ok(problems.length === 0, `deck card ${tpl.id}: ${problems.join('; ')}`);
+    ok((tpl.hints || []).length > 0, `deck card ${tpl.id} has a hint`);
+    ok((tpl.solution || '').length > 0, `deck card ${tpl.id} has a solution`);
+    ok(tpl.par >= 10 && tpl.par <= 300, `deck card ${tpl.id} par time is sane`);
+  }
 }
 {
-  const ids = calc1.templates.map(t => t.id);
+  const ids = [...calc1.templates, ...techniques.templates].map(t => t.id);
   ok(new Set(ids).size === ids.length, 'deck ids are unique');
 }
 
@@ -147,6 +180,20 @@ for (const tpl of calc1.templates) {
 {
   const state = load([calc1], null);
   ok(Object.keys(state.templates).length === calc1.templates.length, 'seed deck merges in');
+
+  // lock-in refill practices the weakest seen cards
+  const t0 = Date.parse('2026-03-01T10:00:00');
+  const ids = Object.keys(state.templates).slice(0, 3);
+  for (const id of ids) {
+    state.templates[id].srs = fsrs.schedule(fsrs.newState(), fsrs.GOOD, t0);
+  }
+  const later = t0 + 86400000; // nothing due yet, so the queue starts empty
+  const lockSession = new Session({ ...state, settings: { ...state.settings, newPerDay: 0 } }, later);
+  const before = lockSession.remaining;
+  const pulled = lockSession.refill(later, 2);
+  ok(pulled === 2, 'refill pulls practice cards');
+  ok(lockSession.remaining === before + 2, 'refilled cards join the queue');
+  ok(lockSession.items.slice(-2).every(i => i.graded && i.extra), 'refills are practice, not graded');
 
   const now = Date.parse('2026-02-01T18:00:00');
   const q1 = buildQueue(state, now);

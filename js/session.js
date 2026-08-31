@@ -3,7 +3,7 @@
 // until it comes out right, but those extra reps never touch memory
 // state.
 
-import { isNew, schedule, AGAIN, HARD, GOOD, EASY } from './fsrs.js';
+import { isNew, schedule, retrievability, AGAIN, HARD, GOOD, EASY } from './fsrs.js';
 import { dayOf } from './store.js';
 
 // What is waiting right now: due reviews oldest-due first, then new
@@ -71,6 +71,18 @@ export class Session {
       this.done.push(item);
     }
     return applied;
+  }
+
+  // Lock-in mode: when the queue runs dry with time on the clock,
+  // pull the weakest seen cards back in as practice.
+  refill(now, n = 5) {
+    const queued = new Set(this.items.map(i => i.entry.tpl.id));
+    const pool = Object.values(this.state.templates)
+      .filter(e => !e.suspended && !isNew(e.srs) && !queued.has(e.tpl.id))
+      .sort((a, b) => retrievability(a.srs, now) - retrievability(b.srs, now))
+      .slice(0, n);
+    for (const e of pool) this.items.push({ entry: e, graded: true, extra: true });
+    return pool.length;
   }
 
   summary() {
