@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>studyflex</title>
+<meta name="description" content="Spaced repetition for problem solving. Every card regenerates with new numbers, so the method is the only thing you can memorize.">
+<meta property="og:title" content="studyflex">
+<meta property="og:description" content="Spaced repetition for problem solving. Every card regenerates with new numbers, so the method is the only thing you can memorize.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='3' y='4.5' width='11' height='8' rx='1.5' fill='%23b9b4a5'/><rect x='2' y='2.5' width='11' height='8' rx='1.5' fill='%23f7f5ef' stroke='%2322262d' stroke-width='1'/><path d='M4.5 6.5l2 2 3.5-3.5' stroke='%232f7d46' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&display=swap">
+<link rel="stylesheet" href="vendor/katex.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="top">
+  <a class="wordmark" href="#today">study<span class="fl">flex</span></a>
+  <nav class="tabs">
+    <a href="#today">today</a>
+    <a href="#cards">cards</a>
+    <a href="#skills">skills</a>
+    <a href="#stats">stats</a>
+  </nav>
+  <div class="top-right">
+    <span class="chip" id="streak-chip" hidden>streak <span class="hot" id="streak-n">0</span></span>
+    <button class="ghost" id="theme-btn" title="switch theme">theme</button>
+  </div>
+</header>
+
+<main>
+
+<section id="view-today">
+  <div id="today-idle">
+    <div class="panel today-hero">
+      <h1 id="hero-line">Ready when you are.</h1>
+      <p class="counts"><b id="n-due">0</b> due &nbsp;·&nbsp; <b id="n-new">0</b> new</p>
+      <button class="primary" id="start-btn">start reviewing</button>
+      <div class="load-bars" id="load-bars" title="reviews coming due over the next two weeks"></div>
+      <p class="fine load-caption">the next two weeks</p>
+    </div>
+
+    <details class="about panel">
+      <summary>how this works</summary>
+      <p>Every card here is a template, not a fact. When a card comes up, its
+      numbers are drawn fresh, so the integral you set up last week comes back
+      with different coefficients and the only thing worth remembering is the
+      method. Type your answer and it gets checked properly: 1/2, 0.5 and
+      sqrt(2)/2 are all read as math, and for indefinite integrals any answer
+      off by a constant counts.</p>
+      <p>Scheduling is spaced repetition (FSRS, the algorithm behind modern
+      Anki). The app grades you from what actually happened: wrong is
+      <i>again</i>, right but slow or with a hint is <i>hard</i>, right and
+      quick is <i>easy</i>. You can override the grade before moving on. Cards
+      you miss come back a few problems later until they stick, and those
+      practice reps never touch the schedule.</p>
+      <p>Keys: <kbd>enter</kbd> submits and continues, <kbd>h</kbd> shows a
+      hint, <kbd>1</kbd>&ndash;<kbd>4</kbd> override the grade,
+      <kbd>esc</kbd> ends the session early. Everything is saved in your
+      browser; nothing leaves it.</p>
+    </details>
+  </div>
+
+  <div id="today-session" hidden>
+    <div class="review">
+      <div class="progress"><i id="progress-bar"></i></div>
+      <div class="panel review-card" id="review-card">
+        <div class="review-meta" id="review-meta"></div>
+        <div class="prompt" id="prompt"></div>
+        <div class="timer" id="timer"><i></i></div>
+        <div id="answer-area"></div>
+        <p class="parse-note" id="parse-note"></p>
+        <div class="hint-row">
+          <button class="plain" id="hint-btn">hint</button>
+          <span class="hint-text" id="hint-text"></span>
+        </div>
+        <div class="outcome" id="outcome" hidden>
+          <p class="verdict" id="verdict"></p>
+          <div class="solution" id="solution"></div>
+          <div class="grade-row" id="grade-row">
+            <span class="lead">graded</span>
+            <button class="grade g1" data-g="1">again<small>1</small></button>
+            <button class="grade g2" data-g="2">hard<small>2</small></button>
+            <button class="grade g3" data-g="3">good<small>3</small></button>
+            <button class="grade g4" data-g="4">easy<small>4</small></button>
+            <span class="spacer" style="flex:1"></span>
+            <button class="primary" id="next-btn">next</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="today-done" hidden>
+    <div class="panel today-hero">
+      <h1>Done for today.</h1>
+      <p class="counts" id="done-line"></p>
+      <div id="done-skills" style="max-width: 420px; margin: 0 auto;"></div>
+      <p style="margin-top: 1.4rem;"><button class="plain" id="back-btn">back to today</button></p>
+    </div>
+  </div>
+</section>
+
+<section id="view-cards" hidden>
+  <div class="toolbar">
+    <button class="primary" id="new-card-btn">new card</button>
+    <button class="plain" id="import-btn">import deck</button>
+    <button class="plain" id="export-deck-btn">export my cards</button>
+    <span class="spacer"></span>
+    <span class="fine" id="card-count"></span>
+  </div>
+  <div class="panel" id="editor" hidden>
+    <p class="eyebrow" id="editor-title">new card</p>
+    <div class="editor-grid">
+      <div>
+        <label for="ed-name">name</label>
+        <input type="text" id="ed-name" placeholder="Chain rule, sine">
+        <label for="ed-skills">skills, comma separated</label>
+        <input type="text" id="ed-skills" placeholder="chain rule, trig derivatives">
+        <label for="ed-par">par time, seconds</label>
+        <input type="number" id="ed-par" value="45" min="5" max="600">
+        <label for="ed-prompt">prompt &nbsp;<span class="fine" style="text-transform:none;letter-spacing:0">$...$ math, {{a}} params</span></label>
+        <textarea id="ed-prompt" rows="3" placeholder="Differentiate. $$f(x) = \sin({{a}}x)$$"></textarea>
+        <label for="ed-params">params, JSON</label>
+        <textarea id="ed-params" rows="4" placeholder='{"a": {"type": "int", "min": 2, "max": 7}}'></textarea>
+        <label for="ed-answer">answer, JSON</label>
+        <textarea id="ed-answer" rows="4" placeholder='{"type": "expression", "expr": "a*cos(a*x)", "vars": ["x"], "display": "{{a}}\\cos({{a}}x)"}'></textarea>
+        <label for="ed-hints">hints, one per line</label>
+        <textarea id="ed-hints" rows="2"></textarea>
+        <label for="ed-solution">solution</label>
+        <textarea id="ed-solution" rows="3"></textarea>
+      </div>
+      <div>
+        <label>preview</label>
+        <div class="preview-box" id="ed-preview"><span class="fine">fill in the prompt to see a draw</span></div>
+        <p><button class="plain" id="ed-redraw">redraw</button></p>
+        <p class="editor-errors" id="ed-errors"></p>
+        <details class="about">
+          <summary>how templates work</summary>
+          <p class="note">Params draw fresh values each review. Types:
+          <span class="mono">int</span> (min, max, optional ne list to
+          exclude values), <span class="mono">float</span> (min, max, dp),
+          <span class="mono">pick</span> (one record from a list, reach into
+          it with <span class="mono">{{q.field}}</span>), and
+          <span class="mono">computed</span> (an expr over earlier params,
+          for clean displays). <span class="mono">{{a:+}}</span> writes the
+          value with its sign, for building polynomials.</p>
+          <p class="note">Answer types: <span class="mono">number</span>
+          (expr evaluated with the drawn params),
+          <span class="mono">expression</span> (expr plus vars; checked by
+          sampling, so any equivalent form counts; set
+          <span class="mono">upToConstant</span> for indefinite integrals and
+          <span class="mono">domain</span> to keep samples away from
+          singularities), <span class="mono">choice</span> (options plus a
+          correct index), and <span class="mono">self</span> (you grade
+          yourself, for derivations). Optional
+          <span class="mono">display</span> is the pretty form shown after
+          answering. Saving draws the card 100 times and makes the reference
+          answer pass its own checker, so a broken card cannot reach a
+          session.</p>
+        </details>
+        <p style="margin-top: 1.2rem;">
+          <button class="primary" id="ed-save">save card</button>
+          <button class="plain" id="ed-cancel">cancel</button>
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <table class="cards" id="cards-table">
+      <thead><tr><th>card</th><th>skills</th><th>state</th><th>due</th><th class="actions"></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<section id="view-skills" hidden>
+  <div class="panel">
+    <p class="eyebrow">skill strength, weakest first</p>
+    <p class="note">Strength is the chance you would get the skill's cards
+    right now, from the scheduler's memory model. It decays between reviews,
+    which is the point: this list is what to worry about before an exam.</p>
+    <div id="skills-list"></div>
+  </div>
+</section>
+
+<section id="view-stats" hidden>
+  <div class="stat-chips">
+    <div class="panel"><div class="k">streak</div><div class="v" id="st-streak">0 <small>days</small></div></div>
+    <div class="panel"><div class="k">reviews</div><div class="v" id="st-total">0</div></div>
+    <div class="panel"><div class="k">cards</div><div class="v" id="st-cards">0</div></div>
+    <div class="panel"><div class="k">last 7 days</div><div class="v" id="st-acc">&ndash;</div></div>
+  </div>
+  <div class="panel">
+    <p class="eyebrow">reviews per day, last 30</p>
+    <canvas class="chart" id="chart-days"></canvas>
+  </div>
+  <div class="panel">
+    <p class="eyebrow">coming due, next 14 days</p>
+    <canvas class="chart" id="chart-due"></canvas>
+  </div>
+  <div class="panel">
+    <p class="eyebrow">settings</p>
+    <div class="settings-row">
+      <div>
+        <label for="set-new">new cards per day</label>
+        <input type="number" id="set-new" min="0" max="50">
+      </div>
+      <div>
+        <label for="set-ret">target retention</label>
+        <select id="set-ret">
+          <option value="0.8">0.80 relaxed</option>
+          <option value="0.85">0.85</option>
+          <option value="0.9">0.90 default</option>
+          <option value="0.93">0.93</option>
+          <option value="0.95">0.95 exam mode</option>
+        </select>
+      </div>
+      <div><button class="plain" id="export-all-btn">export everything</button></div>
+      <div><button class="plain" id="import-all-btn">restore from export</button></div>
+      <div><button class="plain danger" id="wipe-btn">erase all data</button></div>
+    </div>
+    <p class="fine" style="margin-top: 0.9rem;">everything lives in this browser's local storage. export before switching machines.</p>
+  </div>
+</section>
+
+</main>
+
+<div id="toast"></div>
+<input type="file" id="file-input" accept="application/json" hidden>
+
+<footer>
+  <span>studyflex</span>
+  <span>no server, no account, nothing leaves your browser</span>
+  <a href="https://github.com/MathMaster1296/studyflex">source</a>
+</footer>
+
+<script src="vendor/katex.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

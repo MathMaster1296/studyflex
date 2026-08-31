@@ -1,0 +1,764 @@
+// Page wiring. All state lives in store.js; all card logic lives in
+// template.js; this file just renders and routes events.
+
+import { deck as calc1 } from './decks/calc1.js';
+import * as fsrs from './fsrs.js';
+import { draw, fill, check, referenceText, validate } from './template.js';
+import { load, save, exportJSON, importJSON, defaultState, dayOf, streak } from './store.js';
+import { Session, buildQueue, gradeFor } from './session.js';
+import { randomSeed } from './rng.js';
+
+const SEED_DECKS = [calc1];
+const $ = id => document.getElementById(id);
+const DAY = 86400000;
+
+let state = load(SEED_DECKS);
+let session = null;
+
+// ---------- rendering helpers ----------
+
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Text with $...$ and $$...$$ math segments.
+function mathHTML(text) {
+  return text.split(/(\$\$[^$]+\$\$|\$[^$]+\$)/g).map(seg => {
+    if (seg.startsWith('$$')) {
+      return katex.renderToString(seg.slice(2, -2), { displayMode: true, throwOnError: false });
+    }
+    if (seg.startsWith('$')) {
+      return katex.renderToString(seg.slice(1, -1), { throwOnError: false });
+    }
+    return esc(seg);
+  }).join('');
+}
+
+function mathInline(tex) {
+  return katex.renderToString(tex, { throwOnError: false });
+}
+
+let toastTimer = 0;
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+function persist() { save(state); }
+
+// ---------- theme ----------
+
+function applyTheme() {
+  const t = state.settings.theme;
+  if (t === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  $('theme-btn').textContent = t;
+}
+$('theme-btn').addEventListener('click', () => {
+  const order = ['auto', 'light', 'dark'];
+  const t = state.settings.theme;
+  state.settings.theme = order[(order.indexOf(t) + 1) % 3];
+  applyTheme();
+  persist();
+});
+
+// ---------- router ----------
+
+const VIEWS = ['today', 'cards', 'skills', 'stats'];
+
+function route() {
+  const name = location.hash.replace('#', '') || 'today';
+  const view = VIEWS.includes(name) ? name : 'today';
+  for (const v of VIEWS) $(`view-${v}`).hidden = v !== view;
+  document.querySelectorAll('nav.tabs a').forEach(a => {
+    if (a.getAttribute('href') === `#${view}`) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+  if (view === 'today' && !session) renderIdle();
+  if (view === 'cards') renderCards();
+  if (view === 'skills') renderSkills();
+  if (view === 'stats') renderStats();
+}
+window.addEventListener('hashchange', route);
+
+// ---------- today: idle ----------
+
+function renderStreak() {
+  const n = streak(state.logs, Date.now());
+  $('streak-chip').hidden = n === 0;
+  $('streak-n').textContent = n;
+}
+
+function renderIdle() {
+  $('today-idle').hidden = false;
+  $('today-session').hidden = true;
+  $('today-done').hidden = true;
+  const now = Date.now();
+  const { due, fresh } = buildQueue(state, now);
+  $('n-due').textContent = due.length;
+  $('n-new').textContent = fresh.length;
+  const none = due.length + fresh.length === 0;
+  $('start-btn').disabled = none;
+  $('hero-line').textContent = none
+    ? 'Nothing due. Go live your life.'
+    : due.length === 0 ? 'All caught up. New material today.'
+    : 'Ready when you are.';
+
+  // due load, next 14 days
+  const bars = $('load-bars');
+  bars.innerHTML = '';
+  const counts = new Array(14).fill(0);
+  counts[0] = due.length + fresh.length;
+  for (const e of Object.values(state.templates)) {
+    if (e.suspended || fsrs.isNew(e.srs) || e.srs.due <= now) continue;
+    const d = Math.floor((e.srs.due - now) / DAY) + 1;
+    if (d >= 1 && d < 14) counts[d]++;
+  }
+  const max = Math.max(1, ...counts);
+  counts.forEach((c, i) => {
+    const b = document.createElement('span');
+    b.style.height = `${Math.round(100 * c / max)}%`;
+    if (i === 0) b.className = 'now';
+    b.title = i === 0 ? `today: ${c}` : `+${i}d: ${c}`;
+    bars.appendChild(b);
+  });
+  renderStreak();
+}
+
+// ---------- today: session ----------
+
+const ui = {
+  phase: 'idle',      // answering | graded
+  startedAt: 0,
+  hintsUsed: 0,
+  timerId: 0,
+  drawn: null,        // params for the current card
+  choiceOrder: null,  // shuffled option indexes
+  ok: false,
+  grade: 3,
+  practice: false,
+};
+
+function startSession() {
+  session = new Session(state, Date.now());
+  if (!session.remaining) return;
+  $('today-idle').hidden = true;
+  $('today-done').hidden = true;
+  $('today-session').hidden = false;
+  showCard();
+}
+
+function showCard() {
+  const item = session.current;
+  if (!item) return endSession();
+  const e = item.entry;
+  const tpl = e.tpl;
+  ui.phase = 'answering';
+  ui.hintsUsed = 0;
+  ui.practice = item.graded;
+  ui.drawn = draw(tpl, randomSeed());
+  ui.choiceOrder = null;
+
+  $('progress-bar').style.width =
+    `${Math.round(100 * session.done.length / Math.max(1, session.total))}%`;
+
+  const card = $('review-card');
+  card.classList.remove('session-card-enter');
+  void card.offsetWidth; // restart the entry animation
+  card.classList.add('session-card-enter');
+
+  const meta = $('review-meta');
+  meta.innerHTML = '';
+  for (const s of tpl.skills) {
+    const t = document.createElement('span');
+    t.className = 'tag';
+    t.textContent = s;
+    meta.appendChild(t);
+  }
+  if (fsrs.isNew(e.srs) && !ui.practice) {
+    const t = document.createElement('span');
+    t.className = 'tag';
+    t.style.color = 'var(--easy)';
+    t.textContent = 'new';
+    meta.appendChild(t);
+  }
+  if (ui.practice) {
+    const t = document.createElement('span');
+    t.className = 'tag practice-tag';
+    t.textContent = 'until it sticks';
+    meta.appendChild(t);
+  }
+
+  $('prompt').innerHTML = mathHTML(fill(tpl.prompt, ui.drawn));
+  $('parse-note').textContent = '';
+  $('hint-text').textContent = '';
+  $('hint-btn').disabled = !(tpl.hints && tpl.hints.length);
+  $('hint-btn').textContent = 'hint';
+  $('outcome').hidden = true;
+
+  const area = $('answer-area');
+  area.innerHTML = '';
+  const a = tpl.answer;
+  if (a.type === 'number' || a.type === 'expression') {
+    const row = document.createElement('div');
+    row.className = 'answer-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'answer-input';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.placeholder = a.type === 'expression'
+      ? (a.upToConstant ? 'your answer (the + C is optional)' : 'your answer, e.g. 3x^2')
+      : 'your answer, e.g. 1/2 or 0.5';
+    const btn = document.createElement('button');
+    btn.className = 'plain';
+    btn.textContent = 'check';
+    btn.addEventListener('click', submit);
+    row.append(input, btn);
+    area.appendChild(row);
+    input.focus();
+  } else if (a.type === 'choice') {
+    const wrap = document.createElement('div');
+    wrap.className = 'choices';
+    const order = a.options.map((_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    ui.choiceOrder = order;
+    order.forEach((optIdx, pos) => {
+      const b = document.createElement('button');
+      b.dataset.opt = optIdx;
+      b.innerHTML = `<span class="idx">${'abcd'[pos] || pos + 1}</span><span>${mathHTML(fill(a.options[optIdx], ui.drawn))}</span>`;
+      b.addEventListener('click', () => submitChoice(optIdx, b));
+      wrap.appendChild(b);
+    });
+    area.appendChild(wrap);
+  } else if (a.type === 'self') {
+    const p = document.createElement('p');
+    p.className = 'note';
+    p.textContent = 'Work it out, then reveal and grade yourself.';
+    const b = document.createElement('button');
+    b.className = 'primary';
+    b.id = 'reveal-btn';
+    b.textContent = 'show answer';
+    b.addEventListener('click', reveal);
+    area.append(p, b);
+  }
+
+  ui.startedAt = Date.now();
+  startTimer(tpl.par || 60);
+}
+
+function startTimer(par) {
+  clearInterval(ui.timerId);
+  const timer = $('timer');
+  const bar = timer.firstElementChild;
+  timer.classList.remove('over');
+  bar.style.transition = 'none';
+  bar.style.width = '0';
+  void bar.offsetWidth;
+  bar.style.transition = '';
+  ui.timerId = setInterval(() => {
+    const t = (Date.now() - ui.startedAt) / 1000;
+    bar.style.width = `${Math.min(100, 100 * t / par)}%`;
+    if (t > par) timer.classList.add('over');
+  }, 1000);
+}
+
+function elapsed() { return Date.now() - ui.startedAt; }
+
+function submit() {
+  if (ui.phase !== 'answering') return;
+  const tpl = session.current.entry.tpl;
+  const input = $('answer-input');
+  if (!input || !input.value.trim()) return;
+  const result = check(tpl, ui.drawn, input.value);
+  if (result.error) {
+    $('parse-note').textContent = result.error;
+    return;
+  }
+  input.disabled = true;
+  input.classList.add(result.ok ? 'right' : 'wrong');
+  finishAnswer(result.ok);
+}
+
+function submitChoice(optIdx, btn) {
+  if (ui.phase !== 'answering') return;
+  const tpl = session.current.entry.tpl;
+  const ok = optIdx === tpl.answer.correct;
+  btn.classList.add(ok ? 'right' : 'wrong');
+  if (!ok) {
+    document.querySelectorAll('.choices button').forEach(b => {
+      if (Number(b.dataset.opt) === tpl.answer.correct) b.classList.add('right');
+    });
+  }
+  document.querySelectorAll('.choices button').forEach(b => b.disabled = true);
+  finishAnswer(ok);
+}
+
+function reveal() {
+  if (ui.phase !== 'answering') return;
+  finishAnswer(null); // self-graded: verdict comes from the grade keys
+}
+
+function finishAnswer(ok) {
+  clearInterval(ui.timerId);
+  const tpl = session.current.entry.tpl;
+  const ms = elapsed();
+  ui.phase = 'graded';
+
+  const selfGraded = ok === null;
+  ui.ok = selfGraded ? true : ok;
+  ui.grade = selfGraded ? 0 : gradeFor(ok, ms, ui.hintsUsed, tpl.par || 60);
+
+  const verdict = $('verdict');
+  if (selfGraded) {
+    verdict.textContent = 'how did it go?';
+    verdict.className = 'verdict';
+  } else {
+    verdict.textContent = ok ? `right, ${(ms / 1000).toFixed(0)}s` : 'not this time';
+    verdict.className = `verdict ${ok ? 'ok' : 'no'}`;
+  }
+
+  let solution = '';
+  const ref = referenceText(tpl, ui.drawn);
+  if (ref && tpl.answer.type !== 'choice') {
+    solution += `<p>Answer: ${mathInline(ref)}</p>`;
+  }
+  if (tpl.solution) solution += mathHTML(fill(tpl.solution, ui.drawn));
+  $('solution').innerHTML = solution;
+
+  $('grade-row').hidden = false;
+  const hideGrades = ui.practice && !selfGraded;
+  document.querySelectorAll('.grade').forEach(b => {
+    b.classList.toggle('on', Number(b.dataset.g) === ui.grade);
+    b.hidden = hideGrades;
+  });
+  document.querySelector('.grade-row .lead').hidden = ui.practice;
+  $('next-btn').textContent = selfGraded ? 'grade with 1-4' : 'next';
+  $('next-btn').disabled = selfGraded;
+  $('outcome').hidden = false;
+  $('next-btn').focus();
+}
+
+function pickGrade(g) {
+  if (ui.phase !== 'graded') return;
+  const selfType = session.current.entry.tpl.answer.type === 'self';
+  if (ui.practice && !selfType) return;
+  ui.grade = g;
+  if (selfType) ui.ok = g >= 2;
+  document.querySelectorAll('.grade').forEach(b =>
+    b.classList.toggle('on', Number(b.dataset.g) === g));
+  $('next-btn').disabled = false;
+  $('next-btn').textContent = 'next';
+}
+
+function nextCard() {
+  if (ui.phase !== 'graded' || $('next-btn').disabled) return;
+  session.answer(ui.ok, elapsed(), ui.hintsUsed, ui.grade || 3, Date.now());
+  persist();
+  showCard();
+}
+
+function endSession() {
+  clearInterval(ui.timerId);
+  const s = session.summary();
+  session = null;
+  persist();
+  renderStreak();
+  if (!s.graded) { renderIdle(); return; }
+  $('today-session').hidden = true;
+  $('today-done').hidden = false;
+  $('done-line').innerHTML =
+    `<b>${s.right}</b> of <b>${s.graded}</b> right &nbsp;·&nbsp; ${s.minutes.toFixed(1)} min`;
+  const list = $('done-skills');
+  list.innerHTML = '';
+  const rows = Object.entries(s.bySkill).sort((a, b) => a[1].right / a[1].total - b[1].right / b[1].total);
+  for (const [skill, r] of rows) {
+    const div = document.createElement('div');
+    div.className = 'skill-delta';
+    div.innerHTML = `<span>${esc(skill)}</span><span class="mono">${r.right}/${r.total}</span>`;
+    list.appendChild(div);
+  }
+}
+
+$('start-btn').addEventListener('click', startSession);
+$('back-btn').addEventListener('click', renderIdle);
+$('next-btn').addEventListener('click', nextCard);
+$('hint-btn').addEventListener('click', () => {
+  const tpl = session && session.current && session.current.entry.tpl;
+  if (!tpl || ui.phase !== 'answering') return;
+  const hints = tpl.hints || [];
+  if (ui.hintsUsed >= hints.length) return;
+  $('hint-text').innerHTML = mathHTML(fill(hints[ui.hintsUsed], ui.drawn));
+  ui.hintsUsed++;
+  $('hint-btn').textContent = ui.hintsUsed < hints.length ? 'another hint' : 'hint';
+  $('hint-btn').disabled = ui.hintsUsed >= hints.length;
+});
+document.querySelectorAll('.grade').forEach(b =>
+  b.addEventListener('click', () => pickGrade(Number(b.dataset.g))));
+
+document.addEventListener('keydown', ev => {
+  if (!session) return;
+  const typing = ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA';
+  if (ev.key === 'Enter' || ev.keyCode === 13) {
+    if (ui.phase === 'answering') {
+      const tpl = session.current.entry.tpl;
+      if (tpl.answer.type === 'self') reveal();
+      else if (typing) submit();
+      ev.preventDefault();
+    } else if (ui.phase === 'graded') {
+      nextCard();
+      ev.preventDefault();
+    }
+    return;
+  }
+  if (typing) return;
+  if (ev.key === 'Escape') { endSession(); return; }
+  if (ev.key === 'h' && ui.phase === 'answering') { $('hint-btn').click(); return; }
+  if (ui.phase === 'graded' && '1234'.includes(ev.key)) {
+    pickGrade(Number(ev.key));
+    return;
+  }
+  if (ui.phase === 'answering' && ui.choiceOrder && 'abcd'.includes(ev.key)) {
+    const pos = 'abcd'.indexOf(ev.key);
+    const btn = document.querySelectorAll('.choices button')[pos];
+    if (btn) btn.click();
+  }
+});
+
+// ---------- cards ----------
+
+let editingId = null;
+
+function fmtDue(e) {
+  if (fsrs.isNew(e.srs)) return 'new';
+  const d = Math.round((e.srs.due - Date.now()) / DAY);
+  if (d <= 0) return 'now';
+  return d === 1 ? 'tomorrow' : `in ${d}d`;
+}
+
+function renderCards() {
+  const tbody = $('cards-table').querySelector('tbody');
+  tbody.innerHTML = '';
+  const entries = Object.values(state.templates)
+    .sort((a, b) => a.tpl.name.localeCompare(b.tpl.name));
+  $('card-count').textContent = `${entries.length} cards`;
+  for (const e of entries) {
+    const tr = document.createElement('tr');
+    if (e.suspended) tr.className = 'suspended';
+    const stability = fsrs.isNew(e.srs) ? '' : `${e.srs.stability.toFixed(1)}d`;
+    tr.innerHTML = `
+      <td>${esc(e.tpl.name)}${e.custom ? ' <span class="fine">edited</span>' : ''}</td>
+      <td class="mono">${esc(e.tpl.skills.join(', '))}</td>
+      <td class="mono">${stability}</td>
+      <td class="mono">${fmtDue(e)}</td>
+      <td class="actions"></td>`;
+    const actions = tr.querySelector('.actions');
+    const edit = document.createElement('button');
+    edit.className = 'plain';
+    edit.textContent = 'edit';
+    edit.addEventListener('click', () => openEditor(e.tpl.id));
+    actions.appendChild(edit);
+    const susp = document.createElement('button');
+    susp.className = 'plain';
+    susp.textContent = e.suspended ? 'resume' : 'pause';
+    susp.addEventListener('click', () => {
+      e.suspended = !e.suspended;
+      persist(); renderCards();
+    });
+    actions.appendChild(susp);
+    if (e.custom && !e.tpl.id.startsWith('calc1/')) {
+      const del = document.createElement('button');
+      del.className = 'plain danger';
+      del.textContent = 'delete';
+      del.addEventListener('click', () => {
+        if (!confirm(`Delete "${e.tpl.name}" and its history?`)) return;
+        delete state.templates[e.tpl.id];
+        state.logs = state.logs.filter(l => l.id !== e.tpl.id);
+        persist(); renderCards();
+      });
+      actions.appendChild(del);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+function openEditor(id) {
+  editingId = id;
+  $('editor').hidden = false;
+  $('ed-errors').textContent = '';
+  if (id) {
+    const t = state.templates[id].tpl;
+    $('editor-title').textContent = `editing: ${t.name}`;
+    $('ed-name').value = t.name;
+    $('ed-skills').value = t.skills.join(', ');
+    $('ed-par').value = t.par || 45;
+    $('ed-prompt').value = t.prompt;
+    $('ed-params').value = JSON.stringify(t.params || {}, null, 1);
+    $('ed-answer').value = JSON.stringify(t.answer, null, 1);
+    $('ed-hints').value = (t.hints || []).join('\n');
+    $('ed-solution').value = t.solution || '';
+  } else {
+    $('editor-title').textContent = 'new card';
+    for (const f of ['ed-name', 'ed-skills', 'ed-prompt', 'ed-params', 'ed-answer', 'ed-hints', 'ed-solution']) $(f).value = '';
+    $('ed-par').value = 45;
+  }
+  refreshPreview();
+  $('ed-name').focus();
+}
+
+function readEditor() {
+  const name = $('ed-name').value.trim();
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'card';
+  const id = editingId || `user/${slug}-${Date.now().toString(36)}`;
+  let params, answer;
+  try { params = $('ed-params').value.trim() ? JSON.parse($('ed-params').value) : {}; }
+  catch (e) { throw new Error(`params JSON: ${e.message}`); }
+  try { answer = JSON.parse($('ed-answer').value); }
+  catch (e) { throw new Error(`answer JSON: ${e.message}`); }
+  return {
+    id, name,
+    skills: $('ed-skills').value.split(',').map(s => s.trim()).filter(Boolean),
+    par: Number($('ed-par').value) || 45,
+    prompt: $('ed-prompt').value,
+    params, answer,
+    hints: $('ed-hints').value.split('\n').map(s => s.trim()).filter(Boolean),
+    solution: $('ed-solution').value.trim(),
+  };
+}
+
+function refreshPreview() {
+  const box = $('ed-preview');
+  try {
+    const tpl = readEditor();
+    if (!tpl.prompt.trim()) {
+      box.innerHTML = '<span class="fine">fill in the prompt to see a draw</span>';
+      return;
+    }
+    const params = draw(tpl, randomSeed());
+    let html = mathHTML(fill(tpl.prompt, params));
+    const ref = referenceText(tpl, params);
+    if (ref) html += `<p class="note">answer: ${mathInline(ref)}</p>`;
+    box.innerHTML = html;
+    $('ed-errors').textContent = '';
+  } catch (e) {
+    box.innerHTML = '<span class="fine">draw failed</span>';
+    $('ed-errors').textContent = e.message;
+  }
+}
+
+$('new-card-btn').addEventListener('click', () => openEditor(null));
+$('ed-cancel').addEventListener('click', () => { $('editor').hidden = true; editingId = null; });
+$('ed-redraw').addEventListener('click', refreshPreview);
+for (const f of ['ed-prompt', 'ed-params', 'ed-answer']) {
+  $(f).addEventListener('change', refreshPreview);
+}
+$('ed-save').addEventListener('click', () => {
+  let tpl;
+  try { tpl = readEditor(); }
+  catch (e) { $('ed-errors').textContent = e.message; return; }
+  const problems = validate(tpl);
+  if (problems.length) {
+    $('ed-errors').textContent = problems.join('\n');
+    return;
+  }
+  const existing = state.templates[tpl.id];
+  if (existing) {
+    existing.tpl = tpl;
+    existing.custom = true;
+  } else {
+    state.templates[tpl.id] = {
+      tpl, deckId: 'user', custom: true, suspended: false, srs: fsrs.newState(),
+    };
+  }
+  persist();
+  $('editor').hidden = true;
+  editingId = null;
+  renderCards();
+  toast('card saved: it survived 100 draws');
+});
+
+// ---------- import / export ----------
+
+let fileMode = 'deck';
+$('import-btn').addEventListener('click', () => { fileMode = 'deck'; $('file-input').click(); });
+$('import-all-btn').addEventListener('click', () => { fileMode = 'all'; $('file-input').click(); });
+$('file-input').addEventListener('change', async ev => {
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  const text = await file.text();
+  try {
+    if (fileMode === 'all') {
+      if (!confirm('Replace everything with this export?')) return;
+      state = importJSON(text);
+      state = mergeSeeds(state);
+      persist();
+      applyTheme();
+      route();
+      toast('restored');
+      return;
+    }
+    const data = JSON.parse(text);
+    const templates = Array.isArray(data) ? data : data.templates;
+    if (!Array.isArray(templates)) throw new Error('expected {templates: [...]}');
+    let added = 0, skipped = 0;
+    for (const tpl of templates) {
+      const problems = validate(tpl);
+      if (problems.length || state.templates[tpl.id]) { skipped++; continue; }
+      state.templates[tpl.id] = {
+        tpl, deckId: data.id || 'imported', custom: true, suspended: false, srs: fsrs.newState(),
+      };
+      added++;
+    }
+    persist();
+    renderCards();
+    toast(`imported ${added} cards${skipped ? `, skipped ${skipped}` : ''}`);
+  } catch (e) {
+    toast(`import failed: ${e.message}`);
+  }
+});
+
+function mergeSeeds(s) { return load(SEED_DECKS, { getItem: () => JSON.stringify(s), setItem: () => {} }); }
+
+function download(name, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+$('export-deck-btn').addEventListener('click', () => {
+  const templates = Object.values(state.templates).filter(e => e.custom).map(e => e.tpl);
+  if (!templates.length) { toast('no edited or custom cards yet'); return; }
+  download('studyflex-deck.json', JSON.stringify({ id: 'shared', name: 'shared deck', templates }, null, 1));
+});
+$('export-all-btn').addEventListener('click', () => {
+  download(`studyflex-backup-${dayOf(Date.now())}.json`, exportJSON(state));
+});
+$('wipe-btn').addEventListener('click', () => {
+  if (!confirm('Erase every card, edit, and review? Exports are the only way back.')) return;
+  state = load(SEED_DECKS, { getItem: () => null, setItem: () => {} });
+  persist();
+  route();
+  toast('wiped');
+});
+
+// ---------- skills ----------
+
+function renderSkills() {
+  const now = Date.now();
+  const bySkill = {};
+  for (const e of Object.values(state.templates)) {
+    if (e.suspended) continue;
+    for (const s of e.tpl.skills) {
+      bySkill[s] = bySkill[s] || { seen: [], unseen: 0, due: 0 };
+      if (fsrs.isNew(e.srs)) bySkill[s].unseen++;
+      else {
+        bySkill[s].seen.push(fsrs.retrievability(e.srs, now));
+        if (e.srs.due <= now) bySkill[s].due++;
+      }
+    }
+  }
+  const list = $('skills-list');
+  list.innerHTML = '';
+  const rows = Object.entries(bySkill).map(([name, r]) => ({
+    name, ...r,
+    strength: r.seen.length ? r.seen.reduce((a, b) => a + b, 0) / r.seen.length : null,
+  })).sort((a, b) => (a.strength ?? 2) - (b.strength ?? 2));
+  for (const r of rows) {
+    const div = document.createElement('div');
+    div.className = 'skill-row';
+    const pct = r.strength === null ? 0 : Math.round(r.strength * 100);
+    const cls = r.strength === null ? '' : r.strength < 0.7 ? 'weak' : r.strength < 0.85 ? 'mid' : '';
+    const label = r.strength === null
+      ? 'not started'
+      : `${pct}%${r.due ? ` · ${r.due} due` : ''}${r.unseen ? ` · ${r.unseen} unseen` : ''}`;
+    div.innerHTML = `
+      <span class="skill-name">${esc(r.name)}</span>
+      <span class="meter ${cls}"><i style="width:${pct}%"></i></span>
+      <span class="mono">${label}</span>`;
+    list.appendChild(div);
+  }
+}
+
+// ---------- stats ----------
+
+function drawBars(canvas, values, highlight = -1) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement);
+  const accent = css.getPropertyValue('--accent').trim();
+  const dim = css.getPropertyValue('--card-2').trim();
+  const muted = css.getPropertyValue('--muted').trim();
+  const max = Math.max(1, ...values);
+  const gap = 3;
+  const bw = (w - gap * (values.length - 1)) / values.length;
+  values.forEach((v, i) => {
+    const bh = Math.max(v > 0 ? 3 : 1, (h - 16) * v / max);
+    ctx.fillStyle = v === 0 ? dim : (i === highlight ? accent : muted);
+    ctx.globalAlpha = v === 0 ? 0.6 : (i === highlight ? 1 : 0.55);
+    ctx.beginPath();
+    ctx.roundRect(i * (bw + gap), h - 14 - bh, bw, bh, 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = muted;
+  ctx.font = `10px ${css.getPropertyValue('--mono')}`;
+  ctx.fillText(String(max), 2, 10);
+}
+
+function renderStats() {
+  const now = Date.now();
+  const graded = state.logs.filter(l => !l.practice);
+  $('st-streak').innerHTML = `${streak(state.logs, now)} <small>days</small>`;
+  $('st-total').textContent = graded.length;
+  $('st-cards').textContent = Object.keys(state.templates).length;
+  const week = graded.filter(l => now - l.t < 7 * DAY);
+  $('st-acc').innerHTML = week.length
+    ? `${Math.round(100 * week.filter(l => l.ok).length / week.length)}<small>% right</small>`
+    : '&ndash;';
+
+  const perDay = new Array(30).fill(0);
+  for (const l of state.logs) {
+    const d = Math.floor((now - l.t) / DAY);
+    if (d >= 0 && d < 30) perDay[29 - d]++;
+  }
+  drawBars($('chart-days'), perDay, 29);
+
+  const due = new Array(14).fill(0);
+  for (const e of Object.values(state.templates)) {
+    if (e.suspended || fsrs.isNew(e.srs)) continue;
+    const d = e.srs.due <= now ? 0 : Math.floor((e.srs.due - now) / DAY) + 1;
+    if (d < 14) due[d]++;
+  }
+  drawBars($('chart-due'), due, 0);
+
+  $('set-new').value = state.settings.newPerDay;
+  $('set-ret').value = String(state.settings.retention);
+}
+
+$('set-new').addEventListener('change', () => {
+  state.settings.newPerDay = Math.max(0, Number($('set-new').value) || 0);
+  persist();
+});
+$('set-ret').addEventListener('change', () => {
+  state.settings.retention = Number($('set-ret').value);
+  persist();
+});
+
+// ---------- boot ----------
+
+applyTheme();
+persist(); // write back merged seed cards on first load
+route();
