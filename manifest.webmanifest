@@ -1,0 +1,14 @@
+{
+  "name": "studyflex",
+  "short_name": "studyflex",
+  "description": "Spaced repetition for problem solving: every card regenerates, so the method is the only thing you can memorize.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#F7F5EF",
+  "theme_color": "#F7F5EF",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

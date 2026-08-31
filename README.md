@@ -52,6 +52,24 @@ Practice reps never touch the schedule; they are just reps. Landing a session
 earns a small storm of confetti, which is not backed by any study on
 motivation, but neither is most homework.
 
+## Around the reviewing
+
+An exam date on a deck caps the schedule: nothing in that deck gets pushed
+past the exam, so reviews bunch up as the day approaches instead of
+drifting beyond it, and the today page counts down. A wrong tap on a grade
+is not a sentence; undo (the button, or u) restores the memory state, the
+log, and the card, and asks it again. A card that keeps lapsing gets
+flagged as a leech, because a card missed four times is usually a badly
+written card, not a badly studied one. The stats page grows a review wall,
+one square per day. And the share button packs your cards into a URL the
+way pit packs a whole market run into a seed: send the link, they tap
+accept, no server involved.
+
+The app also installs: a manifest and a service worker make it a proper
+offline app on a phone home screen, which is where the reviews actually
+happen. When deploying, bump the VERSION string in sw.js so old caches
+get swept.
+
 ## Getting your notes in
 
 The cards page has an "add from notes" flow. Paste notes or load a text
@@ -112,6 +130,7 @@ date), the session queue, and deck integrity: every shipped card is drawn
 | `js/ai.js` | drafting cards from notes with Claude, loaded only on use |
 | `js/fx.js` | confetti |
 | `js/app.js` | page wiring |
+| `sw.js`, `manifest.webmanifest`, `icons/` | offline install |
 | `test/test.mjs` | the whole suite, no dependencies |
 
 ## What it deliberately leaves out
