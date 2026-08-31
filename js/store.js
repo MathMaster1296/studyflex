@@ -9,7 +9,7 @@ const KEY = 'studyflex-v1';
 export function defaultState() {
   return {
     version: 1,
-    settings: { newPerDay: 5, retention: 0.9, theme: 'auto' },
+    settings: { newPerDay: 5, retention: 0.9, theme: 'auto', exams: {} },
     templates: {},   // id -> {tpl, deckId, custom, suspended, srs}
     logs: [],        // {t, id, ok, ms, hints, grade, practice, n, params}
   };
@@ -57,6 +57,26 @@ export function importJSON(raw) {
 export function dayOf(t) {
   const d = new Date(t);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ---------- deck share links ----------
+
+// A deck travels as base64url JSON in a URL fragment, the same way a
+// pit run travels as a seed. No server involved on either end.
+export function shareEncode(templates) {
+  const json = JSON.stringify({ v: 1, templates });
+  const bytes = new TextEncoder().encode(json);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export function shareDecode(str) {
+  const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  const data = JSON.parse(new TextDecoder().decode(bytes));
+  if (data.v !== 1 || !Array.isArray(data.templates)) throw new Error('not a studyflex deck link');
+  return data.templates;
 }
 
 // Consecutive days with at least one graded review, ending today or

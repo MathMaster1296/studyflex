@@ -5,8 +5,8 @@ import { deck as calc1 } from './decks/calc1.js';
 import { deck as techniques } from './decks/techniques.js';
 import * as fsrs from './fsrs.js';
 import { draw, fill, check, referenceText, validate, renderCloze, isProse } from './template.js';
-import { load, save, exportJSON, importJSON, defaultState, dayOf, streak } from './store.js';
-import { Session, buildQueue, gradeFor } from './session.js';
+import { load, save, exportJSON, importJSON, defaultState, dayOf, streak, shareEncode, shareDecode } from './store.js';
+import { Session, buildQueue, gradeFor, LEECH_LAPSES } from './session.js';
 import { randomSeed } from './rng.js';
 import { confetti } from './fx.js';
 
@@ -136,7 +136,23 @@ function renderIdle() {
     b.title = i === 0 ? `today: ${c}` : `+${i}d: ${c}`;
     bars.appendChild(b);
   });
+  renderExamLine(now);
   renderStreak();
+}
+
+function deckName(id) {
+  return SEED_DECKS.find(d => d.id === id)?.name || 'your notes';
+}
+
+function renderExamLine(now) {
+  const line = $('exam-line');
+  const soonest = Object.entries(state.settings.exams || {})
+    .filter(([, t]) => t > now)
+    .sort((a, b) => a[1] - b[1])[0];
+  line.hidden = !soonest;
+  if (!soonest) return;
+  const days = Math.ceil((soonest[1] - now) / DAY);
+  line.innerHTML = `<b>${days === 1 ? 'tomorrow' : `${days} days`}</b> until the ${esc(deckName(soonest[0]))} exam`;
 }
 
 // ---------- today: session ----------
@@ -163,6 +179,7 @@ function startSession(lockMins = 0) {
   $('today-idle').hidden = true;
   $('today-done').hidden = true;
   $('today-session').hidden = false;
+  $('undo-btn').hidden = true;
   const chip = $('lock-chip');
   chip.hidden = !ui.lockUntil;
   clearInterval(ui.lockTicker);
@@ -400,8 +417,21 @@ function pickGrade(g) {
 
 function nextCard() {
   if (ui.phase !== 'graded' || $('next-btn').disabled) return;
+  const tpl = session.current.entry.tpl;
   session.answer(ui.ok, elapsed(), ui.hintsUsed, ui.grade || 3, Date.now());
+  if (session.leech) {
+    toast(`"${tpl.name}" keeps lapsing: rewrite it or pause it on the cards page`);
+  }
+  $('undo-btn').hidden = !session.lastUndo;
   persist();
+  showCard();
+}
+
+function undoLast() {
+  if (!session || !session.undo()) return;
+  $('undo-btn').hidden = true;
+  persist();
+  toast('took that one back');
   showCard();
 }
 
@@ -439,6 +469,7 @@ function endSession() {
 
 $('start-btn').addEventListener('click', () => startSession(0));
 $('lock-btn').addEventListener('click', () => startSession(Number($('lock-mins').value)));
+$('undo-btn').addEventListener('click', undoLast);
 $('back-btn').addEventListener('click', renderIdle);
 $('next-btn').addEventListener('click', nextCard);
 $('hint-btn').addEventListener('click', () => {
@@ -472,6 +503,7 @@ document.addEventListener('keydown', ev => {
   if (typing) return;
   if (ev.key === 'Escape') { endSession(); return; }
   if (ev.key === 'h' && ui.phase === 'answering') { $('hint-btn').click(); return; }
+  if (ev.key === 'u' && ui.phase === 'answering') { undoLast(); return; }
   if (ui.phase === 'graded' && '1234'.includes(ev.key)) {
     pickGrade(Number(ev.key));
     return;
@@ -497,15 +529,22 @@ function fmtDue(e) {
 function renderCards() {
   const tbody = $('cards-table').querySelector('tbody');
   tbody.innerHTML = '';
-  const entries = Object.values(state.templates)
+  const query = $('card-search').value.trim().toLowerCase();
+  const all = Object.values(state.templates);
+  const entries = all
+    .filter(e => !query ||
+      `${e.tpl.name} ${e.tpl.skills.join(' ')} ${e.deckId}`.toLowerCase().includes(query))
     .sort((a, b) => a.tpl.name.localeCompare(b.tpl.name));
-  $('card-count').textContent = `${entries.length} cards`;
+  $('card-count').textContent = query
+    ? `${entries.length} of ${all.length} cards`
+    : `${all.length} cards`;
   for (const e of entries) {
     const tr = document.createElement('tr');
     if (e.suspended) tr.className = 'suspended';
     const stability = fsrs.isNew(e.srs) ? '' : `${e.srs.stability.toFixed(1)}d`;
+    const leech = e.srs.lapses >= LEECH_LAPSES ? ' <span class="tag leech">leech</span>' : '';
     tr.innerHTML = `
-      <td>${esc(e.tpl.name)}${e.custom ? ' <span class="fine">edited</span>' : ''}</td>
+      <td>${esc(e.tpl.name)}${leech}${e.custom ? ' <span class="fine">edited</span>' : ''}</td>
       <td class="mono">${esc(e.tpl.skills.join(', '))}</td>
       <td class="mono">${stability}</td>
       <td class="mono">${fmtDue(e)}</td>
@@ -604,6 +643,7 @@ function refreshPreview() {
   }
 }
 
+$('card-search').addEventListener('input', renderCards);
 $('new-card-btn').addEventListener('click', () => openEditor(null));
 $('ed-cancel').addEventListener('click', () => { $('editor').hidden = true; editingId = null; });
 $('ed-redraw').addEventListener('click', refreshPreview);
@@ -702,6 +742,36 @@ $('export-deck-btn').addEventListener('click', () => {
   if (!templates.length) { toast('no edited or custom cards yet'); return; }
   download('studyflex-deck.json', JSON.stringify({ id: 'shared', name: 'shared deck', templates }, null, 1));
 });
+
+// share your cards as a link, the way a pit run shares as a seed
+$('share-btn').addEventListener('click', async () => {
+  const templates = Object.values(state.templates).filter(e => e.custom).map(e => e.tpl);
+  if (!templates.length) { toast('no edited or custom cards to share yet'); return; }
+  const encoded = shareEncode(templates);
+  if (encoded.length > 30000) { toast('too many cards for a link: use export instead'); return; }
+  const url = `${location.origin}${location.pathname}#deck=${encoded}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast(`link copied: ${templates.length} cards ride along in the URL`);
+  } catch {
+    prompt('copy this link', url);
+  }
+});
+
+function importFromHash() {
+  const m = location.hash.match(/^#deck=(.+)$/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname);
+  let templates;
+  try { templates = shareDecode(m[1]); }
+  catch { toast('that deck link did not decode'); return; }
+  const fresh = templates.filter(t => t && t.id && !state.templates[t.id]);
+  if (!fresh.length) { toast('nothing new in that deck link'); return; }
+  if (!confirm(`This link carries ${fresh.length} cards. Add them?`)) return;
+  const { added, problems } = saveTemplates(fresh);
+  toast(added ? `added ${added} cards from the link` : `no valid cards: ${problems[0] || ''}`);
+  route();
+}
 $('export-all-btn').addEventListener('click', () => {
   // backups travel between machines; the API key stays in this browser
   const clean = { ...state, settings: { ...state.settings, apiKey: undefined } };
@@ -946,6 +1016,9 @@ function renderStats() {
     ? `${Math.round(100 * week.filter(l => l.ok).length / week.length)}<small>% right</small>`
     : '&ndash;';
 
+  renderHeatmap(now);
+  renderExamSettings();
+
   const perDay = new Array(30).fill(0);
   for (const l of state.logs) {
     const d = Math.floor((now - l.t) / DAY);
@@ -972,6 +1045,54 @@ $('set-key').addEventListener('change', () => {
   toast(state.settings.apiKey ? 'key saved in this browser only' : 'key removed');
 });
 
+// GitHub-wall style: 26 weeks of days, colored by review count.
+function renderHeatmap(now) {
+  const byDay = {};
+  for (const l of state.logs) byDay[dayOf(l.t)] = (byDay[dayOf(l.t)] || 0) + 1;
+  const box = $('heatmap');
+  box.innerHTML = '';
+  const start = new Date(now - 181 * DAY);
+  start.setDate(start.getDate() - start.getDay()); // back up to a Sunday
+  for (let t = start.getTime(); ; t += DAY) {
+    const cell = document.createElement('i');
+    const n = byDay[dayOf(t)] || 0;
+    if (t > now) cell.className = 'future';
+    else if (n > 0) cell.className = `l${Math.min(4, Math.ceil(n / 8))}`;
+    cell.title = `${dayOf(t)}: ${n} review${n === 1 ? '' : 's'}`;
+    box.appendChild(cell);
+    const d = new Date(t + DAY);
+    if (t >= now && d.getDay() === 0) break;
+  }
+}
+
+function renderExamSettings() {
+  const box = $('exam-settings');
+  box.innerHTML = '';
+  const deckIds = [...new Set(Object.values(state.templates).map(e => e.deckId))];
+  for (const id of deckIds) {
+    const div = document.createElement('div');
+    const label = document.createElement('label');
+    label.textContent = deckName(id);
+    const input = document.createElement('input');
+    input.type = 'date';
+    const t = state.settings.exams?.[id];
+    if (t) input.value = dayOf(t);
+    input.addEventListener('change', () => {
+      state.settings.exams = state.settings.exams || {};
+      if (input.value) {
+        // end of the exam day, local time
+        state.settings.exams[id] = new Date(`${input.value}T23:59:00`).getTime();
+      } else {
+        delete state.settings.exams[id];
+      }
+      persist();
+      toast(input.value ? `${deckName(id)}: nothing schedules past ${input.value}` : 'exam date cleared');
+    });
+    div.append(label, input);
+    box.appendChild(div);
+  }
+}
+
 $('set-new').addEventListener('change', () => {
   state.settings.newPerDay = Math.max(0, Number($('set-new').value) || 0);
   persist();
@@ -985,4 +1106,8 @@ $('set-ret').addEventListener('change', () => {
 
 applyTheme();
 persist(); // write back merged seed cards on first load
+importFromHash();
 route();
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}

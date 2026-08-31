@@ -7,8 +7,8 @@ import { parse, evaluate, evalIn, equivalent, stripConstant } from '../js/expr.j
 import * as fsrs from '../js/fsrs.js';
 import { rng } from '../js/rng.js';
 import { draw, fill, check, validate, textMatch, clozeSpans, renderCloze } from '../js/template.js';
-import { defaultState, load, streak, dayOf } from '../js/store.js';
-import { buildQueue, gradeFor, Session } from '../js/session.js';
+import { defaultState, load, streak, dayOf, shareEncode, shareDecode } from '../js/store.js';
+import { buildQueue, gradeFor, Session, LEECH_LAPSES } from '../js/session.js';
 import { deck as calc1 } from '../js/decks/calc1.js';
 import { deck as techniques } from '../js/decks/techniques.js';
 
@@ -228,6 +228,46 @@ for (const deck of [calc1, techniques]) {
   ok(streak(state.logs, now + 86400000) === 1, 'streak survives until a full day is missed');
   ok(streak(state.logs, now + 3 * 86400000) === 0, 'streak dies after a missed day');
   ok(dayOf(now) === '2026-02-01', 'local day key');
+}
+
+// ---------- share links, exam clamp, undo ----------
+
+{
+  const originals = calc1.templates.slice(0, 3);
+  const round = shareDecode(shareEncode(originals));
+  ok(JSON.stringify(round) === JSON.stringify(originals), 'share link round-trips exactly');
+  ok(round.every(t => validate(t).length === 0), 'shared cards still validate');
+  throws(() => shareDecode('not-base64!!!'), 'garbage links are rejected');
+
+  const state = load([calc1], null);
+  const now = Date.parse('2026-11-01T10:00:00');
+  const exam = Date.parse('2026-11-04T23:59:00');
+  state.settings.exams = { calc1: exam };
+  state.settings.newPerDay = 2;
+  const s1 = new Session(state, now);
+  const firstId = s1.current.entry.tpl.id;
+  s1.answer(true, 5000, 0, fsrs.EASY, now); // Easy would schedule ~2 weeks out
+  ok(state.templates[firstId].srs.due <= exam, 'nothing schedules past the exam');
+  ok(state.templates[firstId].srs.due > now, 'clamped due date stays in the future');
+
+  // undo restores memory state, log, and queue position
+  const secondId = s1.current.entry.tpl.id;
+  const logsBefore = state.logs.length;
+  s1.answer(true, 5000, 0, fsrs.GOOD, now);
+  ok(state.templates[secondId].srs.reps === 1, 'answer applied before undo');
+  ok(s1.undo(), 'undo succeeds');
+  ok(state.templates[secondId].srs.reps === 0, 'undo restores memory state');
+  ok(state.logs.length === logsBefore, 'undo removes the log entry');
+  ok(s1.current.entry.tpl.id === secondId && !s1.current.graded, 'undone card is asked again');
+  ok(!s1.undo(), 'undo works once per answer');
+
+  // a wrong answer that gets undone also removes its practice requeue
+  s1.answer(false, 5000, 0, fsrs.AGAIN, now);
+  ok(s1.items.some(i => i.graded), 'miss requeued as practice');
+  s1.undo();
+  ok(!s1.items.some(i => i.graded), 'undo removes the practice requeue');
+
+  ok(LEECH_LAPSES >= 3, 'leech threshold is not hair-trigger');
 }
 
 console.log(failed ? `\n${passed} passed, ${failed} FAILED` : `all ${passed} checks passed`);

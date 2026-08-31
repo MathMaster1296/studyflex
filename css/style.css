@@ -408,6 +408,34 @@ canvas.chart { width: 100%; height: 150px; display: block; }
 .ai-card .preview { font-size: 0.95rem; margin-top: 0.15rem; overflow-wrap: break-word; }
 .ai-card .preview b { color: var(--accent); }
 
+/* ---------- heatmap ---------- */
+
+.heatmap {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.heatmap i {
+  width: 11px; height: 11px;
+  border-radius: 2px;
+  background: var(--card-2);
+}
+.heatmap i.l1 { background: color-mix(in srgb, var(--accent) 30%, var(--card-2)); }
+.heatmap i.l2 { background: color-mix(in srgb, var(--accent) 55%, var(--card-2)); }
+.heatmap i.l3 { background: color-mix(in srgb, var(--accent) 80%, var(--card-2)); }
+.heatmap i.l4 { background: var(--accent); }
+.heatmap i.future { opacity: 0.35; }
+
+/* ---------- exam line, leeches, search ---------- */
+
+.exam-line { font-size: 0.8rem; color: var(--ink-2); margin: 1rem 0 0; }
+.exam-line b { color: var(--accent); }
+.tag.leech { color: var(--again); background: var(--again-bg); }
+#card-search { width: 160px; font-size: 0.82rem; }
+
 /* ---------- micro-interactions ---------- */
 
 button.primary, button.plain, button.ghost, .grade, .choices button {
