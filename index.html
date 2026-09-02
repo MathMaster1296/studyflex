@@ -238,6 +238,32 @@
 </section>
 
 <section id="view-skills" hidden>
+  <div class="panel" id="dump-panel">
+    <p class="eyebrow">brain dump</p>
+    <div id="dump-setup">
+      <p class="note">Blank page, three minutes, notes closed: write everything
+      you can summon about one topic. Free recall like this beat concept
+      mapping in Karpicke and Blunt's experiments, and it shows you what you
+      actually have, not what feels familiar.</p>
+      <p>
+        <select id="dump-skill"></select>
+        <button class="primary" id="dump-start">start the clock</button>
+      </p>
+    </div>
+    <div id="dump-live" hidden>
+      <div class="session-top">
+        <div class="progress"><i id="dump-bar"></i></div>
+        <span class="chip lock-chip" id="dump-clock">3:00</span>
+      </div>
+      <textarea id="dump-text" rows="10" placeholder="Everything you remember. Full sentences optional."></textarea>
+      <p style="margin-bottom:0"><button class="primary" id="dump-finish">done, show me the cards</button></p>
+    </div>
+    <div id="dump-review" hidden>
+      <p class="note" id="dump-verdict"></p>
+      <div id="dump-cards"></div>
+      <p style="margin-bottom:0"><button class="plain" id="dump-again">another dump</button></p>
+    </div>
+  </div>
   <div class="panel">
     <p class="eyebrow">skill strength, weakest first</p>
     <p class="note">Strength is the chance you would get the skill's cards
@@ -253,6 +279,15 @@
     <div class="panel"><div class="k">reviews</div><div class="v" id="st-total">0</div></div>
     <div class="panel"><div class="k">cards</div><div class="v" id="st-cards">0</div></div>
     <div class="panel"><div class="k">last 7 days</div><div class="v" id="st-acc">&ndash;</div></div>
+  </div>
+  <div class="stat-chips">
+    <div class="panel"><div class="k">longest streak</div><div class="v" id="st-longest">0 <small>days</small></div></div>
+    <div class="panel"><div class="k">best day</div><div class="v" id="st-best">0 <small>reviews</small></div></div>
+    <div class="panel"><div class="k">streak freezes</div><div class="v" id="st-freezes">0 <small>banked</small></div></div>
+  </div>
+  <div class="panel">
+    <p class="eyebrow">badges</p>
+    <div class="badges" id="badges"></div>
   </div>
   <div class="panel">
     <p class="eyebrow">the year so far</p>

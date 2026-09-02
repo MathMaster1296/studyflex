@@ -39,9 +39,16 @@ that fails to parse is an error message, not a miss.
 
 Scheduling is FSRS-4.5 with the published default weights. The scheduler
 sees one grade per card per day; a card you miss comes back a few problems
-later until it sticks, and those practice reps never touch memory state. The
-skills page shows the model's current recall probability per skill, weakest
-first, which is the list to read the week before an exam.
+later until it sticks, and those practice reps never touch memory state.
+Sessions are interleaved: the queue round-robins across skills so you never
+get a comfortable run of one problem type, because picking the method is
+the exam skill and blocked practice quietly skips it. The skills page shows
+the model's current recall probability per skill, weakest first, which is
+the list to read the week before an exam. That page also has a brain dump:
+three minutes, blank page, notes closed, then the app shows you what the
+topic actually covers. Free recall like this beat concept mapping in
+Karpicke and Blunt's 2011 experiments, and it audits your memory instead of
+your feelings about it.
 
 ## Locking in
 
@@ -61,7 +68,10 @@ is not a sentence; undo (the button, or u) restores the memory state, the
 log, and the card, and asks it again. A card that keeps lapsing gets
 flagged as a leech, because a card missed four times is usually a badly
 written card, not a badly studied one. The stats page grows a review wall,
-one square per day. And the share button packs your cards into a URL the
+one square per day, plus a badge shelf and your records: longest streak,
+best day. Every seven straight days banks a streak freeze (two fit in the
+bank), and a freeze quietly covers a missed day so one bad Tuesday does
+not zero a month of work. And the share button packs your cards into a URL the
 way pit packs a whole market run into a seed: send the link, they tap
 accept, no server involved.
 
@@ -128,6 +138,7 @@ date), the session queue, and deck integrity: every shipped card is drawn
 | `js/decks/calc1.js` | the calculus seed deck |
 | `js/decks/techniques.js` | the how-to-study seed deck |
 | `js/ai.js` | drafting cards from notes with Claude, loaded only on use |
+| `js/gamify.js` | streak freezes, badges, records |
 | `js/fx.js` | confetti |
 | `js/app.js` | page wiring |
 | `sw.js`, `manifest.webmanifest`, `icons/` | offline install |

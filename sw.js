@@ -3,7 +3,7 @@
 // (and on a plane), and picks up a deploy one load later.
 // Bump VERSION with any deploy so old caches get swept.
 
-const VERSION = 'studyflex-v3';
+const VERSION = 'studyflex-v4';
 const CORE = [
   '.',
   'index.html',
@@ -11,7 +11,7 @@ const CORE = [
   'vendor/katex.css',
   'vendor/katex.min.js',
   'js/app.js', 'js/fsrs.js', 'js/expr.js', 'js/rng.js', 'js/template.js',
-  'js/store.js', 'js/session.js', 'js/fx.js', 'js/ai.js',
+  'js/store.js', 'js/session.js', 'js/fx.js', 'js/ai.js', 'js/gamify.js',
   'js/decks/calc1.js', 'js/decks/techniques.js',
   'manifest.webmanifest',
 ];

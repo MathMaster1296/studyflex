@@ -9,6 +9,7 @@ import { load, save, exportJSON, importJSON, defaultState, dayOf, streak, shareE
 import { Session, buildQueue, gradeFor, LEECH_LAPSES } from './session.js';
 import { randomSeed } from './rng.js';
 import { confetti } from './fx.js';
+import { applyFreezes, streakWithFreezes, earnFreezes, longestStreak, checkBadges, BADGES, FREEZE_EVERY } from './gamify.js';
 
 const SEED_DECKS = [calc1, techniques];
 const $ = id => document.getElementById(id);
@@ -81,7 +82,7 @@ function route() {
   });
   if (view === 'today' && !session) renderIdle();
   if (view === 'cards') renderCards();
-  if (view === 'skills') renderSkills();
+  if (view === 'skills') { renderSkills(); renderDumpSetup(); }
   if (view === 'stats') renderStats();
 }
 window.addEventListener('hashchange', route);
@@ -89,7 +90,7 @@ window.addEventListener('hashchange', route);
 // ---------- today: idle ----------
 
 function renderStreak() {
-  const n = streak(state.logs, Date.now());
+  const n = streakWithFreezes(state, Date.now());
   const chip = $('streak-chip');
   const grew = !chip.hidden && Number($('streak-n').textContent) !== n;
   chip.hidden = n === 0;
@@ -113,8 +114,14 @@ function renderIdle() {
   const seen = Object.values(state.templates).some(e => !e.suspended && !fsrs.isNew(e.srs));
   $('start-btn').disabled = none;
   $('lock-btn').disabled = none && !seen;
-  $('hero-line').textContent = none
-    ? (seen ? 'Nothing due. Lock in anyway, or go live your life.' : 'Nothing due. Go live your life.')
+  const reviewDays = state.logs.filter(l => l.id && !l.practice).map(l => l.t);
+  const lastReview = reviewDays.length ? Math.max(...reviewDays) : 0;
+  const away = lastReview ? Math.floor((now - lastReview) / DAY) : 0;
+  $('hero-line').textContent =
+    away >= 3 && !none
+      ? `Back after ${away} days. The curve forgave you; start small.`
+    : none
+      ? (seen ? 'Nothing due. Lock in anyway, or go live your life.' : 'Nothing due. Go live your life.')
     : due.length === 0 ? 'All caught up. New material today.'
     : 'Ready when you are.';
 
@@ -445,9 +452,21 @@ function endSession() {
   ui.lockUntil = 0;
   const s = session.summary();
   const practiced = session.results.filter(r => r.practice).length;
+  if (locked >= 5) state.logs.push({ t: Date.now(), lock: locked });
   session = null;
+
+  const now = Date.now();
+  const currentStreak = streakWithFreezes(state, now);
+  const earnedFreezes = earnFreezes(state, currentStreak);
+  const { fresh } = checkBadges(state, now, currentStreak);
   persist();
   renderStreak();
+  if (earnedFreezes) {
+    toast(`${currentStreak}-day streak: freeze banked. one missed day is now survivable.`);
+  } else if (fresh.length) {
+    const b = BADGES.find(x => x.id === fresh[0]);
+    toast(`badge earned: ${b.name} (${b.desc})`);
+  }
   if (!s.graded && !practiced) { renderIdle(); return; }
   $('today-session').hidden = true;
   $('today-done').hidden = false;
@@ -455,7 +474,7 @@ function endSession() {
   if (practiced) bits.push(`${practiced} practice`);
   bits.push(locked ? `locked in ${locked} min` : `${s.minutes.toFixed(1)} min`);
   $('done-line').innerHTML = bits.join(' &nbsp;·&nbsp; ');
-  confetti(s.graded >= 10 ? 1.4 : 1);
+  confetti(fresh.length ? 1.8 : s.graded >= 10 ? 1.4 : 1);
   const list = $('done-skills');
   list.innerHTML = '';
   const rows = Object.entries(s.bySkill).sort((a, b) => a[1].right / a[1].total - b[1].right / b[1].total);
@@ -937,6 +956,80 @@ $('ai-clear').addEventListener('click', () => {
   $('ai-status').textContent = '';
 });
 
+// ---------- brain dump ----------
+
+const dump = { skill: null, startedAt: 0, timerId: 0 };
+
+function renderDumpSetup() {
+  $('dump-setup').hidden = false;
+  $('dump-live').hidden = true;
+  $('dump-review').hidden = true;
+  const sel = $('dump-skill');
+  sel.innerHTML = '';
+  const skills = new Set();
+  for (const e of Object.values(state.templates)) {
+    if (e.suspended || fsrs.isNew(e.srs)) continue;
+    for (const s of e.tpl.skills) skills.add(s);
+  }
+  const all = document.createElement('option');
+  all.value = '';
+  all.textContent = 'everything I have studied';
+  sel.appendChild(all);
+  for (const s of [...skills].sort()) {
+    const o = document.createElement('option');
+    o.value = s;
+    o.textContent = s;
+    sel.appendChild(o);
+  }
+  $('dump-start').disabled = skills.size === 0;
+}
+
+$('dump-start').addEventListener('click', () => {
+  dump.skill = $('dump-skill').value;
+  dump.startedAt = Date.now();
+  $('dump-setup').hidden = true;
+  $('dump-live').hidden = false;
+  $('dump-text').value = '';
+  $('dump-text').focus();
+  const total = 180000;
+  clearInterval(dump.timerId);
+  const tick = () => {
+    const left = Math.max(0, dump.startedAt + total - Date.now());
+    const m = Math.floor(left / 60000), s = Math.floor(left / 1000) % 60;
+    $('dump-clock').textContent = `${m}:${String(s).padStart(2, '0')}`;
+    $('dump-clock').classList.toggle('low', left < 30000);
+    $('dump-bar').style.width = `${100 * (1 - left / total)}%`;
+    if (left === 0) { clearInterval(dump.timerId); toast('time. finish the thought, then compare.'); }
+  };
+  tick();
+  dump.timerId = setInterval(tick, 1000);
+});
+
+$('dump-finish').addEventListener('click', () => {
+  clearInterval(dump.timerId);
+  const words = $('dump-text').value.trim().split(/\s+/).filter(Boolean).length;
+  const entries = Object.values(state.templates).filter(e =>
+    !e.suspended && !fsrs.isNew(e.srs) &&
+    (!dump.skill || e.tpl.skills.includes(dump.skill)));
+  state.logs.push({ t: Date.now(), practice: 1, id: 'dump', dump: 1, skill: dump.skill || 'all', words });
+  persist();
+  $('dump-live').hidden = true;
+  $('dump-review').hidden = false;
+  $('dump-verdict').textContent =
+    `${words} words from memory. Here is what ${dump.skill ? `"${dump.skill}"` : 'your studied material'} actually covers; anything that never surfaced is your real to-do list.`;
+  const list = $('dump-cards');
+  list.innerHTML = '';
+  const now = Date.now();
+  for (const e of entries.sort((a, b) => a.tpl.name.localeCompare(b.tpl.name))) {
+    const row = document.createElement('div');
+    row.className = 'dump-card';
+    row.innerHTML = `<span>${esc(e.tpl.name)}</span><span class="spacer" style="flex:1"></span><span class="mono">${esc(e.tpl.skills.join(', '))} · ${Math.round(fsrs.retrievability(e.srs, now) * 100)}%</span>`;
+    list.appendChild(row);
+  }
+});
+
+$('dump-again').addEventListener('click', renderDumpSetup);
+
 // ---------- skills ----------
 
 function renderSkills() {
@@ -1007,8 +1100,9 @@ function drawBars(canvas, values, highlight = -1) {
 
 function renderStats() {
   const now = Date.now();
-  const graded = state.logs.filter(l => !l.practice);
-  $('st-streak').innerHTML = `${streak(state.logs, now)} <small>days</small>`;
+  const graded = state.logs.filter(l => l.id && !l.practice);
+  const currentStreak = streakWithFreezes(state, now);
+  $('st-streak').innerHTML = `${currentStreak} <small>days</small>`;
   $('st-total').textContent = graded.length;
   $('st-cards').textContent = Object.keys(state.templates).length;
   const week = graded.filter(l => now - l.t < 7 * DAY);
@@ -1016,11 +1110,30 @@ function renderStats() {
     ? `${Math.round(100 * week.filter(l => l.ok).length / week.length)}<small>% right</small>`
     : '&ndash;';
 
+  const byDay = {};
+  for (const l of graded) byDay[dayOf(l.t)] = (byDay[dayOf(l.t)] || 0) + 1;
+  $('st-longest').innerHTML = `${longestStreak(state)} <small>days</small>`;
+  $('st-best').innerHTML = `${Math.max(0, ...Object.values(byDay))} <small>reviews</small>`;
+  $('st-freezes').innerHTML = `${state.gamify.freezes} <small>banked</small>`;
+  $('st-freezes').title = `earn one per ${FREEZE_EVERY} streak days; a freeze quietly covers a missed day`;
+
+  const { earned } = checkBadges(state, now, currentStreak);
+  const wall = $('badges');
+  wall.innerHTML = '';
+  for (const b of BADGES) {
+    const chip = document.createElement('span');
+    chip.className = `badge-chip${earned.includes(b.id) ? ' earned' : ''}`;
+    chip.textContent = b.name;
+    chip.title = b.desc;
+    wall.appendChild(chip);
+  }
+
   renderHeatmap(now);
   renderExamSettings();
 
   const perDay = new Array(30).fill(0);
   for (const l of state.logs) {
+    if (!l.id) continue;
     const d = Math.floor((now - l.t) / DAY);
     if (d >= 0 && d < 30) perDay[29 - d]++;
   }
@@ -1048,7 +1161,9 @@ $('set-key').addEventListener('change', () => {
 // GitHub-wall style: 26 weeks of days, colored by review count.
 function renderHeatmap(now) {
   const byDay = {};
-  for (const l of state.logs) byDay[dayOf(l.t)] = (byDay[dayOf(l.t)] || 0) + 1;
+  for (const l of state.logs) {
+    if (l.id) byDay[dayOf(l.t)] = (byDay[dayOf(l.t)] || 0) + 1;
+  }
   const box = $('heatmap');
   box.innerHTML = '';
   const start = new Date(now - 181 * DAY);
@@ -1105,7 +1220,9 @@ $('set-ret').addEventListener('change', () => {
 // ---------- boot ----------
 
 applyTheme();
-persist(); // write back merged seed cards on first load
+const spent = applyFreezes(state, Date.now());
+persist(); // write back merged seed cards (and any spent freeze) on first load
+if (spent) toast(`a streak freeze covered ${spent === 1 ? 'yesterday' : `${spent} missed days`}`);
 importFromHash();
 route();
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
