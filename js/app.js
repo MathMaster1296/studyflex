@@ -5,7 +5,15 @@ import { deck as calc1 } from './decks/calc1.js';
 import { deck as techniques } from './decks/techniques.js';
 import * as fsrs from './fsrs.js';
 import { draw, fill, check, referenceText, validate, renderCloze, isProse } from './template.js';
-import { load, save, exportJSON, importJSON, defaultState, dayOf, streak, shareEncode, shareDecode } from './store.js';
+import { load, save, exportJSON, importJSON, defaultState, dayOf, streak, shareEncode, shareDecode, rebuildSrs } from './store.js';
+import { createSync, applyStateDoc } from './sync.js';
+
+// bury already-synced log entries so other devices drop them too
+function addTombs(logs) {
+  for (const l of logs) {
+    if (l.synced) state.logs.push({ t: Date.now(), k: crypto.randomUUID(), tomb: l.k });
+  }
+}
 import { Session, buildQueue, gradeFor, LEECH_LAPSES } from './session.js';
 import { randomSeed } from './rng.js';
 import { confetti } from './fx.js';
@@ -50,7 +58,119 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
 }
 
-function persist() { save(state); }
+function persist() {
+  save(state);
+  if (syncer && syncer.user() && !session) scheduleSync();
+}
+
+// ---------- sync ----------
+
+const SYNC_KEY = 'studyflex-sync';
+let syncCfg = null;
+try { syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)); } catch { /* stays off */ }
+let syncer = null;
+let syncTimer = 0;
+
+function buildSyncer() {
+  if (!syncCfg || !syncCfg.url || !syncCfg.anonKey) { syncer = null; return; }
+  syncer = createSync({
+    url: syncCfg.url,
+    anonKey: syncCfg.anonKey,
+    meta: {
+      load: () => syncCfg.meta || {},
+      save: m => { syncCfg.meta = m; localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg)); },
+    },
+  });
+}
+buildSyncer();
+
+function syncStatus(text) {
+  const el = $('sync-status');
+  if (el) el.textContent = text;
+}
+
+function scheduleSync() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => doSync('auto'), 4000);
+}
+
+async function doSync(reason) {
+  if (!syncer || !syncer.user()) return;
+  clearTimeout(syncTimer);
+  syncStatus('syncing...');
+  try {
+    let docCame = false;
+    const r = await syncer.sync(state, (doc, first) => {
+      applyStateDoc(state, doc, fsrs.newState, first);
+      docCame = true;
+    });
+    if (r.pulled || docCame) rebuildSrs(state);
+    save(state);
+    if (!session && (r.pulled || docCame)) { route(); renderStreak(); }
+    const bits = [];
+    if (r.pushed) bits.push(`${r.pushed} up`);
+    if (r.pulled) bits.push(`${r.pulled} down`);
+    if (r.docNote) bits.push(`cards ${r.docNote}`);
+    syncStatus(`synced ${new Date().toLocaleTimeString()}${bits.length ? ': ' + bits.join(', ') : ', nothing new'}`);
+  } catch (e) {
+    syncStatus(`sync failed: ${e.message}`);
+    if (reason === 'boot') toast('sync is having trouble; your data is safe locally');
+  }
+}
+
+function renderSyncPanel() {
+  const configured = !!syncer;
+  const signedIn = configured && !!syncer.user();
+  $('sync-setup').hidden = configured;
+  $('sync-auth').hidden = !configured || signedIn;
+  $('sync-on').hidden = !signedIn;
+  if (signedIn) $('sync-user').textContent = syncer.user();
+}
+
+$('sync-save').addEventListener('click', () => {
+  const url = $('sync-url').value.trim().replace(/\/$/, '');
+  const anonKey = $('sync-key').value.trim();
+  const local = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(url);
+  if ((!/^https:\/\/.+/.test(url) && !local) || !anonKey) { syncStatus('need the project url and its anon key'); return; }
+  syncCfg = { url, anonKey, meta: {} };
+  localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg));
+  buildSyncer();
+  renderSyncPanel();
+  syncStatus('project saved. sign in, or create the account you will use on every device.');
+});
+
+$('sync-signin').addEventListener('click', async () => {
+  try {
+    await syncer.signIn($('sync-email').value.trim(), $('sync-pass').value);
+    renderSyncPanel();
+    doSync('signin');
+  } catch (e) { syncStatus(`sign in failed: ${e.message}`); }
+});
+
+$('sync-signup').addEventListener('click', async () => {
+  try {
+    const user = await syncer.signUp($('sync-email').value.trim(), $('sync-pass').value);
+    if (!user) { syncStatus('almost: confirm the email Supabase just sent, then sign in here.'); return; }
+    renderSyncPanel();
+    doSync('signup');
+  } catch (e) { syncStatus(`could not create the account: ${e.message}`); }
+});
+
+$('sync-reset').addEventListener('click', () => {
+  localStorage.removeItem(SYNC_KEY);
+  syncCfg = null;
+  buildSyncer();
+  renderSyncPanel();
+  syncStatus('');
+});
+
+$('sync-out').addEventListener('click', () => {
+  syncer.signOut();
+  renderSyncPanel();
+  syncStatus('signed out. local data stays put.');
+});
+
+$('sync-now').addEventListener('click', () => doSync('manual'));
 
 // ---------- theme ----------
 
@@ -435,7 +555,10 @@ function nextCard() {
 }
 
 function undoLast() {
-  if (!session || !session.undo()) return;
+  if (!session) return;
+  const removed = session.undo();
+  if (!removed) return;
+  addTombs([removed]);
   $('undo-btn').hidden = true;
   persist();
   toast('took that one back');
@@ -452,7 +575,7 @@ function endSession() {
   ui.lockUntil = 0;
   const s = session.summary();
   const practiced = session.results.filter(r => r.practice).length;
-  if (locked >= 5) state.logs.push({ t: Date.now(), lock: locked });
+  if (locked >= 5) state.logs.push({ t: Date.now(), lock: locked, k: crypto.randomUUID() });
   session = null;
 
   const now = Date.now();
@@ -589,7 +712,9 @@ function renderCards() {
       del.addEventListener('click', () => {
         if (!confirm(`Delete "${e.tpl.name}" and its history?`)) return;
         delete state.templates[e.tpl.id];
+        const gone = state.logs.filter(l => l.id === e.tpl.id);
         state.logs = state.logs.filter(l => l.id !== e.tpl.id);
+        addTombs(gone);
         persist(); renderCards();
       });
       actions.appendChild(del);
@@ -1011,7 +1136,7 @@ $('dump-finish').addEventListener('click', () => {
   const entries = Object.values(state.templates).filter(e =>
     !e.suspended && !fsrs.isNew(e.srs) &&
     (!dump.skill || e.tpl.skills.includes(dump.skill)));
-  state.logs.push({ t: Date.now(), practice: 1, id: 'dump', dump: 1, skill: dump.skill || 'all', words });
+  state.logs.push({ t: Date.now(), practice: 1, id: 'dump', dump: 1, skill: dump.skill || 'all', words, k: crypto.randomUUID() });
   persist();
   $('dump-live').hidden = true;
   $('dump-review').hidden = false;
@@ -1130,6 +1255,7 @@ function renderStats() {
 
   renderHeatmap(now);
   renderExamSettings();
+  renderSyncPanel();
 
   const perDay = new Array(30).fill(0);
   for (const l of state.logs) {
@@ -1225,6 +1351,7 @@ persist(); // write back merged seed cards (and any spent freeze) on first load
 if (spent) toast(`a streak freeze covered ${spent === 1 ? 'yesterday' : `${spent} missed days`}`);
 importFromHash();
 route();
+doSync('boot');
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

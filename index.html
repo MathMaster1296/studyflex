@@ -303,6 +303,49 @@
     <canvas class="chart" id="chart-due"></canvas>
   </div>
   <div class="panel">
+    <p class="eyebrow">sync between devices</p>
+    <div id="sync-setup">
+      <p class="note">Optional. Your reviews and cards sync through a free
+      Supabase project that you own; this app has no server of its own. The
+      <a href="https://github.com/MathMaster1296/studyflex#sync-between-devices">readme</a>
+      has the three-step setup, then paste the project's URL and anon key here.</p>
+      <div class="settings-row">
+        <div>
+          <label for="sync-url">project url</label>
+          <input type="text" id="sync-url" placeholder="https://xyz.supabase.co" size="28">
+        </div>
+        <div>
+          <label for="sync-key">anon key</label>
+          <input type="password" id="sync-key" placeholder="eyJ..." autocomplete="off">
+        </div>
+        <div><button class="plain" id="sync-save">save</button></div>
+      </div>
+    </div>
+    <div id="sync-auth" hidden>
+      <div class="settings-row">
+        <div>
+          <label for="sync-email">email</label>
+          <input type="text" id="sync-email" autocomplete="off">
+        </div>
+        <div>
+          <label for="sync-pass">password</label>
+          <input type="password" id="sync-pass" autocomplete="off">
+        </div>
+        <div><button class="primary" id="sync-signin">sign in</button></div>
+        <div><button class="plain" id="sync-signup">create account</button></div>
+        <div><button class="plain" id="sync-reset">change project</button></div>
+      </div>
+    </div>
+    <div id="sync-on" hidden>
+      <div class="settings-row">
+        <div><span class="chip">syncing as <span class="hot" id="sync-user"></span></span></div>
+        <div><button class="plain" id="sync-now">sync now</button></div>
+        <div><button class="plain" id="sync-out">sign out</button></div>
+      </div>
+    </div>
+    <p class="fine" id="sync-status" style="margin: 0.7rem 0 0;"></p>
+  </div>
+  <div class="panel">
     <p class="eyebrow">exam dates</p>
     <p class="note">Give a deck an exam date and nothing in it gets scheduled past
     that day: reviews bunch up as the exam approaches instead of drifting
@@ -345,7 +388,7 @@
 
 <footer>
   <span>studyflex</span>
-  <span>no server, no account, nothing leaves your browser</span>
+  <span>no account needed, and nothing leaves your browser unless you turn on sync</span>
   <a href="https://github.com/MathMaster1296/studyflex">source</a>
 </footer>
 
