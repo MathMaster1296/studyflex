@@ -11,7 +11,8 @@ export function defaultState() {
     version: 1,
     settings: { newPerDay: 5, retention: 0.9, theme: 'auto', exams: {} },
     templates: {},   // id -> {tpl, deckId, custom, suspended, srs}
-    logs: [],        // {t, id, ok, ms, hints, grade, practice, n, params}
+    logs: [],        // {t, id, ok, ms, hints, grade, practice, n} plus {t, lock} and {t, dump} markers
+    gamify: { freezes: 0, frozenDays: [], earnedFreezes: 0, seenBadges: [] },
   };
 }
 
@@ -82,7 +83,7 @@ export function shareDecode(str) {
 // Consecutive days with at least one graded review, ending today or
 // yesterday (a streak is not broken until a whole day is missed).
 export function streak(logs, now) {
-  const days = new Set(logs.filter(l => !l.practice).map(l => dayOf(l.t)));
+  const days = new Set(logs.filter(l => l.id && !l.practice).map(l => dayOf(l.t)));
   let count = 0;
   let cursor = now;
   if (!days.has(dayOf(cursor))) cursor -= 86400000;

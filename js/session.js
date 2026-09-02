@@ -6,17 +6,35 @@
 import { isNew, schedule, retrievability, AGAIN, HARD, GOOD, EASY } from './fsrs.js';
 import { dayOf } from './store.js';
 
-// What is waiting right now: due reviews oldest-due first, then new
-// cards up to the daily allowance.
+// Round-robin across skills so no two same-skill cards sit together.
+// Mixed practice is harder and slower than blocked runs of one type,
+// and it is what transfers to exams (Rohrer and Taylor's result).
+export function interleave(entries) {
+  const groups = new Map();
+  for (const e of entries) {
+    const key = e.tpl.skills[0] || '';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  }
+  const lists = [...groups.values()];
+  const out = [];
+  for (let i = 0; out.length < entries.length; i++) {
+    for (const list of lists) if (i < list.length) out.push(list[i]);
+  }
+  return out;
+}
+
+// What is waiting right now: due reviews before new cards, each set
+// interleaved across skills.
 export function buildQueue(state, now) {
   const entries = Object.values(state.templates).filter(e => !e.suspended);
-  const due = entries
+  const due = interleave(entries
     .filter(e => !isNew(e.srs) && e.srs.due <= now)
-    .sort((a, b) => a.srs.due - b.srs.due);
+    .sort((a, b) => a.srs.due - b.srs.due));
   const introducedToday = state.logs
     .filter(l => l.n && dayOf(l.t) === dayOf(now)).length;
   const allowance = Math.max(0, state.settings.newPerDay - introducedToday);
-  const fresh = entries.filter(e => isNew(e.srs)).slice(0, allowance);
+  const fresh = interleave(entries.filter(e => isNew(e.srs)).slice(0, allowance));
   return { due, fresh, queue: [...due, ...fresh] };
 }
 

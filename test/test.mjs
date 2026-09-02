@@ -8,7 +8,8 @@ import * as fsrs from '../js/fsrs.js';
 import { rng } from '../js/rng.js';
 import { draw, fill, check, validate, textMatch, clozeSpans, renderCloze } from '../js/template.js';
 import { defaultState, load, streak, dayOf, shareEncode, shareDecode } from '../js/store.js';
-import { buildQueue, gradeFor, Session, LEECH_LAPSES } from '../js/session.js';
+import { buildQueue, gradeFor, Session, LEECH_LAPSES, interleave } from '../js/session.js';
+import { applyFreezes, streakWithFreezes, earnFreezes, longestStreak, checkBadges, BADGES, FREEZE_CAP } from '../js/gamify.js';
 import { deck as calc1 } from '../js/decks/calc1.js';
 import { deck as techniques } from '../js/decks/techniques.js';
 
@@ -268,6 +269,76 @@ for (const deck of [calc1, techniques]) {
   ok(!s1.items.some(i => i.graded), 'undo removes the practice requeue');
 
   ok(LEECH_LAPSES >= 3, 'leech threshold is not hair-trigger');
+}
+
+// ---------- interleaving ----------
+
+{
+  const mk = (id, skill) => ({ tpl: { id, skills: [skill] } });
+  const mixed = interleave([mk(1, 'a'), mk(2, 'a'), mk(3, 'a'), mk(4, 'b'), mk(5, 'b'), mk(6, 'c')]);
+  ok(mixed.map(e => e.tpl.skills[0]).join('') === 'abcaba', 'skills round-robin instead of blocking');
+  ok(mixed.length === 6, 'interleave keeps every card');
+  ok(interleave([]).length === 0, 'interleave handles empty');
+
+  const state = load([calc1], null);
+  const q = buildQueue(state, Date.now());
+  const firstSkills = q.fresh.map(e => e.tpl.skills[0]);
+  ok(new Set(firstSkills.slice(0, 3)).size === Math.min(3, new Set(firstSkills).size),
+    'new cards arrive mixed across skills');
+}
+
+// ---------- streak freezes ----------
+
+{
+  const day = n => Date.parse('2026-05-01T12:00:00') + n * 86400000;
+  const mkState = reviewedDays => ({
+    ...defaultState(),
+    logs: reviewedDays.map(n => ({ t: day(n), id: 'x', ok: true })),
+  });
+
+  // one missed day, one freeze banked: streak survives
+  let s = mkState([0, 1, 2, 3, 4, 5, 6]); // 7 days
+  let streakNow = streakWithFreezes(s, day(6));
+  ok(streakNow === 7, 'streak counts before freezing');
+  ok(earnFreezes(s, streakNow) === 1, 'a week banks one freeze');
+  ok(earnFreezes(s, streakNow) === 0, 'the same week does not bank twice');
+  ok(applyFreezes(s, day(8)) === 1, 'a freeze covers the missed day');
+  ok(s.gamify.freezes === 0, 'the freeze is spent');
+  ok(streakWithFreezes(s, day(8)) === 8, 'streak survives the gap (frozen day counts)');
+
+  // no freeze banked: streak dies
+  s = mkState([0, 1, 2]);
+  ok(applyFreezes(s, day(4)) === 0, 'no freeze, no rescue');
+  ok(streakWithFreezes(s, day(4)) === 0, 'streak is dead');
+
+  // gap wider than the bank: nothing is wasted
+  s = mkState([0, 1, 2, 3, 4, 5, 6]);
+  earnFreezes(s, 7);
+  ok(applyFreezes(s, day(11)) === 0, 'a 4-day gap is not patchable');
+  ok(s.gamify.freezes === 1, 'the freeze is kept for a survivable gap');
+
+  ok(FREEZE_CAP >= 1 && FREEZE_CAP <= 3, 'freeze bank stays small');
+  ok(longestStreak(mkState([0, 1, 2, 5, 6])) === 3, 'longest streak found across gaps');
+}
+
+// ---------- badges ----------
+
+{
+  const day = n => Date.parse('2026-05-01T12:00:00') + n * 86400000;
+  const s = defaultState();
+  for (let d = 0; d < 7; d++) {
+    for (let i = 0; i < 15; i++) s.logs.push({ t: day(d) + i * 60000, id: `c${i}`, ok: true });
+  }
+  s.logs.push({ t: day(6), lock: 55 });
+  s.logs.push({ t: day(6), practice: 1, id: 'dump', dump: 1 });
+  const { earned, fresh } = checkBadges(s, day(6), 7);
+  for (const id of ['day-one', 'streak-3', 'streak-7', 'reviews-100', 'clean-sweep', 'deep-work', 'brain-dump']) {
+    ok(earned.includes(id), `badge ${id} earned`);
+  }
+  ok(!earned.includes('streak-30'), 'unearned badges stay unearned');
+  ok(fresh.length === earned.length, 'first check reports all as new');
+  ok(checkBadges(s, day(6), 7).fresh.length === 0, 'second check reports nothing new');
+  ok(new Set(BADGES.map(b => b.id)).size === BADGES.length, 'badge ids are unique');
 }
 
 console.log(failed ? `\n${passed} passed, ${failed} FAILED` : `all ${passed} checks passed`);
