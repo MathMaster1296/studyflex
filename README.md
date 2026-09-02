@@ -24,8 +24,8 @@ The second failure is grading yourself. "Was that easy or good?" is a
 negotiation, and the lazy answer compounds into a schedule built on wishful
 thinking. StudyFlex checks your actual answer and grades from what happened:
 wrong is again, right but slow or with a hint is hard, right and quick is
-easy. You can override before moving on, but the default is measured, not
-negotiated.
+easy. You can override before moving on, but the starting point is always
+what the clock and the checker saw.
 
 ## How answers are checked
 
@@ -45,8 +45,8 @@ get a comfortable run of one problem type, because picking the method is
 the exam skill and blocked practice quietly skips it. The skills page shows
 the model's current recall probability per skill, weakest first, which is
 the list to read the week before an exam. That page also has a brain dump:
-three minutes, blank page, notes closed, then the app shows you what the
-topic actually covers. Free recall like this beat concept mapping in
+you get three minutes and a blank page with the notes closed, and afterward
+the app shows you what the topic actually covers. Free recall like this beat concept mapping in
 Karpicke and Blunt's 2011 experiments, and it audits your memory instead of
 your feelings about it.
 
