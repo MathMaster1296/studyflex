@@ -10,6 +10,9 @@ import { draw, fill, check, validate, textMatch, clozeSpans, renderCloze } from 
 import { defaultState, load, streak, dayOf, shareEncode, shareDecode } from '../js/store.js';
 import { buildQueue, gradeFor, Session, LEECH_LAPSES, interleave } from '../js/session.js';
 import { applyFreezes, streakWithFreezes, earnFreezes, longestStreak, checkBadges, BADGES, FREEZE_CAP } from '../js/gamify.js';
+import { createSync, applyStateDoc, applyTombs, stateDoc } from '../js/sync.js';
+import { rebuildSrs } from '../js/store.js';
+import { startMock } from './mock-supabase.mjs';
 import { deck as calc1 } from '../js/decks/calc1.js';
 import { deck as techniques } from '../js/decks/techniques.js';
 
@@ -339,6 +342,97 @@ for (const deck of [calc1, techniques]) {
   ok(fresh.length === earned.length, 'first check reports all as new');
   ok(checkBadges(s, day(6), 7).fresh.length === 0, 'second check reports nothing new');
   ok(new Set(BADGES.map(b => b.id)).size === BADGES.length, 'badge ids are unique');
+}
+
+// ---------- sync ----------
+
+{
+  const mock = await startMock();
+  const mkSync = () => {
+    let meta = {};
+    return createSync({ url: mock.url, anonKey: 'anon', meta: { load: () => meta, save: m => meta = m } });
+  };
+  const now = Date.parse('2026-09-01T19:00:00');
+
+  const applyTo = target => (doc, first) => applyStateDoc(target, doc, fsrs.newState, first);
+
+  // device A reviews three cards and pushes
+  const A = load([calc1], null);
+  const sessionA = new Session(A, now);
+  for (let i = 0; i < 3; i++) sessionA.answer(true, 20000, 0, fsrs.GOOD, now + i * 60000);
+  const syncA = mkSync();
+  ok(await syncA.signUp('p@x.edu', 'hunter22') === 'p@x.edu', 'sign up returns the user');
+  let r = await syncA.sync(A, applyTo(A));
+  ok(r.pushed === 3 && r.pulled === 0, 'first sync pushes the reviews');
+  ok(A.logs.every(l => l.synced), 'pushed logs are marked');
+
+  // device B signs in fresh and pulls everything
+  const B = load([calc1], null);
+  const syncB = mkSync();
+  ok(await syncB.signIn('p@x.edu', 'hunter22') === 'p@x.edu', 'sign in works');
+  r = await syncB.sync(B, applyTo(B));
+  rebuildSrs(B);
+  ok(r.pulled === 3 && r.docNote === 'merged', 'second device pulls the history and merges the doc');
+  const cardId = A.logs[0].id;
+  ok(JSON.stringify(B.templates[cardId].srs) === JSON.stringify(A.templates[cardId].srs),
+    'replayed scheduler state matches the original exactly');
+
+  // an idle re-sync moves nothing
+  r = await syncA.sync(A, applyTo(A));
+  ok(r.pushed === 0 && r.pulled === 0 && !r.docNote, 'idle sync moves nothing');
+
+  // undo on A tombstones the review; B drops it after its next pull
+  const undoTarget = A.logs[2];
+  A.logs.splice(2, 1);
+  A.logs.push({ t: now + 5 * 60000, k: crypto.randomUUID(), tomb: undoTarget.k });
+  rebuildSrs(A);
+  await syncA.sync(A, applyTo(A));
+  r = await syncB.sync(B, applyTo(B));
+  rebuildSrs(B);
+  ok(!B.logs.some(l => l.k === undoTarget.k), 'tombstoned review disappears on the other device');
+  ok(JSON.stringify(B.templates[undoTarget.id].srs) === JSON.stringify(A.templates[undoTarget.id].srs),
+    'both devices agree after the undo');
+
+  // custom cards travel in the state doc
+  const mkCard = (id, name) => ({
+    tpl: { id, name, skills: ['bio'], par: 25,
+      prompt: 'Water moves toward the [[saltier]] side.', params: {}, answer: { type: 'cloze' } },
+    deckId: 'notes', custom: true, suspended: false, srs: fsrs.newState(),
+  });
+  A.templates['user/osmosis'] = mkCard('user/osmosis', 'Osmosis');
+  await syncA.sync(A, applyTo(A));
+  r = await syncB.sync(B, applyTo(B));
+  ok(r.docNote === 'adopted' && B.templates['user/osmosis'], 'custom cards arrive on the other device');
+
+  // both devices edit cards: the syncing device wins and says so
+  A.templates['user/osmosis'].tpl.name = 'Osmosis, renamed on A';
+  B.templates['user/osmosis'].tpl.name = 'Osmosis, renamed on B';
+  await syncA.sync(A, applyTo(A));
+  r = await syncB.sync(B, applyTo(B));
+  ok(r.docNote === 'conflict, this device won', 'doc conflict is reported');
+  r = await syncA.sync(A, applyTo(A));
+  ok(A.templates['user/osmosis'].tpl.name === 'Osmosis, renamed on B', 'the later edit spreads');
+
+  // a device with its own local cards signs in: first sync merges,
+  // deletes nothing, and its extras reach everyone
+  const C = load([calc1], null);
+  C.templates['user/diffusion'] = mkCard('user/diffusion', 'Diffusion');
+  const syncC = mkSync();
+  await syncC.signIn('p@x.edu', 'hunter22');
+  r = await syncC.sync(C, applyTo(C));
+  ok(r.docNote === 'merged', 'first sync merges instead of fighting');
+  ok(C.templates['user/diffusion'] && C.templates['user/osmosis'], 'first sync keeps both sides');
+  r = await syncA.sync(A, applyTo(A));
+  ok(A.templates['user/diffusion'], 'the merged extras spread to other devices');
+
+  ok(!JSON.stringify(stateDoc(A)).includes('sk-ant'), 'sanity: no key material in the doc');
+  const withKey = { ...A, settings: { ...A.settings, apiKey: 'sk-ant-secret' } };
+  ok(!JSON.stringify(stateDoc(withKey)).includes('sk-ant-secret'), 'the API key never enters the sync doc');
+
+  applyTombs(A);
+  ok(!A.logs.some(l => l.k === undoTarget.k), 'applyTombs is idempotent');
+
+  mock.close();
 }
 
 console.log(failed ? `\n${passed} passed, ${failed} FAILED` : `all ${passed} checks passed`);

@@ -84,7 +84,7 @@ export class Session {
       const exam = this.state.settings.exams?.[e.deckId];
       if (exam && now < exam && e.srs.due > exam) e.srs = { ...e.srs, due: exam };
       this.state.logs.push({
-        t: now, id: e.tpl.id, ok, ms, hints, grade,
+        t: now, id: e.tpl.id, ok, ms, hints, grade, k: crypto.randomUUID(),
         ...(first ? { n: 1 } : {}),
       });
       this.leech = grade === AGAIN && e.srs.lapses >= LEECH_LAPSES;
@@ -96,7 +96,7 @@ export class Session {
         donePushed: ok && grade !== AGAIN,
       };
     } else {
-      this.state.logs.push({ t: now, id: e.tpl.id, ok, ms, hints, practice: 1 });
+      this.state.logs.push({ t: now, id: e.tpl.id, ok, ms, hints, practice: 1, k: crypto.randomUUID() });
     }
     this.results.push({ id: e.tpl.id, ok, ms, hints, grade, practice });
     if (!ok || (!practice && grade === AGAIN)) {
@@ -111,11 +111,12 @@ export class Session {
 
   // Take back the most recent graded answer: memory state, log, and
   // queue position are all restored, and the card is asked again.
+  // Returns the removed log entry so sync can bury it server-side.
   undo() {
     const u = this.lastUndo;
     if (!u) return false;
     u.entry.srs = u.prevSrs;
-    this.state.logs.splice(u.logIndex, 1);
+    const [removed] = this.state.logs.splice(u.logIndex, 1);
     this.results.splice(u.resultIndex, 1);
     if (u.requeued) {
       const i = this.items.findIndex(it => it.graded && it.entry === u.entry);
@@ -127,7 +128,7 @@ export class Session {
     }
     this.items.unshift({ entry: u.entry, graded: false });
     this.lastUndo = null;
-    return true;
+    return removed;
   }
 
   // Lock-in mode: when the queue runs dry with time on the clock,

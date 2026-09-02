@@ -2,7 +2,7 @@
 // Seed decks are merged in at load so new cards in a shipped deck
 // appear without touching anyone's scheduling state.
 
-import { newState } from './fsrs.js';
+import { newState, schedule } from './fsrs.js';
 
 const KEY = 'studyflex-v1';
 
@@ -22,6 +22,10 @@ export function load(decks, storage = globalThis.localStorage) {
     const raw = storage && storage.getItem(KEY);
     if (raw) state = { ...state, ...JSON.parse(raw) };
   } catch { /* corrupted or unavailable storage: start fresh */ }
+  // every log entry carries a key so sync can deduplicate across devices
+  for (const l of state.logs) {
+    if (!l.k) l.k = crypto.randomUUID();
+  }
   for (const deck of decks) {
     for (const tpl of deck.templates) {
       const have = state.templates[tpl.id];
@@ -58,6 +62,29 @@ export function importJSON(raw) {
 export function dayOf(t) {
   const d = new Date(t);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Replay the graded log through the scheduler so memory state is a
+// pure function of the merged history. This is what makes sync safe:
+// devices exchange log rows, never scheduler state.
+export function rebuildSrs(state) {
+  const byCard = {};
+  for (const l of state.logs) {
+    if (!l.id || l.practice || !l.grade) continue;
+    (byCard[l.id] = byCard[l.id] || []).push(l);
+  }
+  for (const [id, logs] of Object.entries(byCard)) {
+    const e = state.templates[id];
+    if (!e) continue;
+    logs.sort((a, b) => a.t - b.t);
+    let srs = newState();
+    for (const l of logs) {
+      srs = schedule(srs, l.grade, l.t, state.settings.retention);
+      const exam = state.settings.exams?.[e.deckId];
+      if (exam && l.t < exam && srs.due > exam) srs = { ...srs, due: exam };
+    }
+    e.srs = srs;
+  }
 }
 
 // ---------- deck share links ----------
