@@ -193,10 +193,13 @@ $('theme-btn').addEventListener('click', () => {
 
 const VIEWS = ['today', 'cards', 'skills', 'stats'];
 
+let lastView = '';
 function route() {
   const name = location.hash.replace('#', '') || 'today';
   const view = VIEWS.includes(name) ? name : 'today';
   for (const v of VIEWS) $(`view-${v}`).hidden = v !== view;
+  if (lastView && lastView !== view) window.scrollTo(0, 0); // a new tab starts at its top
+  lastView = view;
   document.querySelectorAll('nav.tabs a').forEach(a => {
     if (a.getAttribute('href') === `#${view}`) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
@@ -284,7 +287,7 @@ function renderReadiness(now) {
     div.className = 'skill-row';
     div.innerHTML = `
       <span class="skill-name">${esc(deckName(r.deckId))}</span>
-      <span class="meter ${cls}"><i style="width:${pct}%"></i></span>
+      <span class="meter ${cls}" aria-hidden="true"><i style="width:${pct}%"></i></span>
       <span class="mono">${pct}% on exam day${r.unseen ? ` · ${r.unseen} untouched` : ''}</span>`;
     box.appendChild(div);
   }
@@ -362,8 +365,9 @@ function showCard() {
   ui.drawn = draw(tpl, randomSeed());
   ui.choiceOrder = null;
 
-  $('progress-bar').style.width =
-    `${Math.round(100 * session.done.length / Math.max(1, session.total))}%`;
+  const pct = Math.round(100 * session.done.length / Math.max(1, session.total));
+  $('progress-bar').style.width = `${pct}%`;
+  $('progress').setAttribute('aria-valuenow', pct);
 
   const card = $('review-card');
   card.classList.remove('session-card-enter');
@@ -413,6 +417,7 @@ function showCard() {
     input.id = 'answer-input';
     input.autocomplete = 'off';
     input.spellcheck = false;
+    input.setAttribute('aria-label', 'your answer');
     input.placeholder =
       a.type === 'cloze' ? 'the missing part'
       : a.type === 'text' ? 'your answer'
@@ -467,6 +472,10 @@ function showCard() {
     b.addEventListener('click', revealStep);
     area.append(p, list, b);
   }
+
+  // keyboard users land on the thing to press next
+  const firstControl = $('reveal-btn') || $('step-btn') || document.querySelector('.choices button');
+  if (firstControl) firstControl.focus();
 
   // echo back the math the checker will read, as it is typed
   const input = $('answer-input');
@@ -1279,7 +1288,7 @@ function renderSkills() {
       : `${pct}%${r.due ? ` · ${r.due} due` : ''}${r.unseen ? ` · ${r.unseen} unseen` : ''}`;
     div.innerHTML = `
       <span class="skill-name">${esc(r.name)}</span>
-      <span class="meter ${cls}"><i style="width:${pct}%"></i></span>
+      <span class="meter ${cls}" aria-hidden="true"><i style="width:${pct}%"></i></span>
       <span class="mono">${label}</span>`;
     if (r.strength !== null) {
       const drill = document.createElement('button');
@@ -1383,6 +1392,7 @@ function renderStats() {
   $('set-new').value = state.settings.newPerDay;
   $('set-ret').value = String(state.settings.retention);
   $('set-key').value = state.settings.apiKey || '';
+  $('set-cozy').checked = !!state.settings.cozy;
 
   const last = state.settings.lastExportAt;
   const syncedUp = syncer && syncer.user();
@@ -1392,6 +1402,15 @@ function renderStats() {
       ? `last full export: ${Math.floor((now - last) / DAY)} days ago.`
       : 'no full export yet. one file, and a lost laptop costs you nothing.';
 }
+
+function applyCozy() {
+  document.body.classList.toggle('cozy', !!state.settings.cozy);
+}
+$('set-cozy').addEventListener('change', () => {
+  state.settings.cozy = $('set-cozy').checked;
+  applyCozy();
+  persist();
+});
 
 $('set-key').addEventListener('change', () => {
   state.settings.apiKey = $('set-key').value.trim();
@@ -1407,6 +1426,9 @@ function renderHeatmap(now) {
   }
   const box = $('heatmap');
   box.innerHTML = '';
+  const total = Object.values(byDay).reduce((a, b) => a + b, 0);
+  const activeDays = Object.keys(byDay).length;
+  box.setAttribute('aria-label', `review calendar: ${total} reviews over ${activeDays} days in the last 26 weeks`);
   const start = new Date(now - 181 * DAY);
   start.setDate(start.getDate() - start.getDay()); // back up to a Sunday
   for (let t = start.getTime(); ; t += DAY) {
@@ -1461,6 +1483,7 @@ $('set-ret').addEventListener('change', () => {
 // ---------- boot ----------
 
 applyTheme();
+applyCozy();
 const spent = applyFreezes(state, Date.now());
 persist(); // write back merged seed cards (and any spent freeze) on first load
 if (spent) toast(`a streak freeze covered ${spent === 1 ? 'yesterday' : `${spent} missed days`}`);

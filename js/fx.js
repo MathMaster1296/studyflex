@@ -9,6 +9,7 @@ export function confetti(strength = 1) {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   if (!canvas) {
     canvas = document.createElement('canvas');
+    canvas.setAttribute('aria-hidden', 'true');
     canvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:99';
     document.body.appendChild(canvas);
   }

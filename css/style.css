@@ -9,14 +9,14 @@
   --card-2: #EFEDE5;
   --ink: #22262D;
   --ink-2: #575C63;
-  --muted: #8B8E94;
+  --muted: #6B6F75;   /* 4.7:1 on paper, so small labels pass AA */
   --hairline: #E2DFD5;
   --accent: #2F7D46;
   --accent-soft: #E7F1E9;
   --link: #1E5CA8;
-  --again: #C0453A;
+  --again: #B8402F;
   --again-bg: #FAECE9;
-  --hard: #A87415;
+  --hard: #8A5E0E;
   --hard-bg: #F9F1DE;
   --good: #2F7D46;
   --good-bg: #E7F1E9;
@@ -87,6 +87,39 @@ a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 2
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
 .mono { font-family: var(--mono); }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.skip {
+  position: absolute; left: 1rem; top: -3rem;
+  background: var(--ink); color: var(--paper);
+  font-family: var(--mono); font-size: 0.85rem;
+  padding: 0.5em 1em; border-radius: 0 0 8px 8px;
+  z-index: 100;
+}
+.skip:focus { top: 0; }
+
+/* easier reading: a plain sans face, more air between letters and
+   lines. The same knobs that help dyslexic readers help tired ones. */
+body.cozy {
+  --serif: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: 0.02em;
+  word-spacing: 0.08em;
+  line-height: 1.8;
+}
+body.cozy .prompt { font-size: 1.15rem; }
+body.cozy .katex { font-size: 1.15em; }
+
+label.check {
+  display: flex; align-items: center; gap: 0.5em;
+  font-family: var(--serif); font-size: 0.95rem;
+  text-transform: none; letter-spacing: 0; color: var(--ink);
+  margin: 0;
+}
+label.check input { width: 1.1em; height: 1.1em; accent-color: var(--accent); }
 
 /* ---------- header ---------- */
 
@@ -525,6 +558,17 @@ button.primary:active, button.plain:active, .grade:active, .choices button:activ
   0% { transform: scale(1); }
   40% { transform: scale(1.25); }
   100% { transform: scale(1); }
+}
+
+/* ---------- touch ---------- */
+
+@media (max-width: 640px) {
+  button.primary, button.plain, .grade, .choices button, nav.tabs a { min-height: 44px; }
+  nav.tabs a { display: inline-flex; align-items: center; }
+  input[type="text"], input[type="search"], input[type="number"], input[type="password"], textarea, select,
+  #card-search, .lock-group select {
+    font-size: 16px; /* under 16px, iOS zooms the page on focus */
+  }
 }
 
 /* ---------- toast ---------- */

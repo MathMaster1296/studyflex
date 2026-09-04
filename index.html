@@ -21,6 +21,8 @@
 </head>
 <body>
 
+<a class="skip" href="#main">skip to content</a>
+
 <header class="top">
   <a class="wordmark" href="#today">study<span class="fl">flex</span></a>
   <nav class="tabs">
@@ -35,9 +37,9 @@
   </div>
 </header>
 
-<main>
+<main id="main">
 
-<section id="view-today">
+<section id="view-today" aria-label="today">
   <div id="today-idle">
     <div class="panel today-hero">
       <h1 id="hero-line">Ready when you are.</h1>
@@ -47,7 +49,7 @@
         <button class="plain" id="five-btn" title="a tiny session for a low day: five cards, streak intact">just five</button>
         <span class="lock-group">
           <button class="plain" id="lock-btn">lock in</button>
-          <select id="lock-mins" title="minutes on the clock">
+          <select id="lock-mins" title="minutes on the clock" aria-label="lock in length">
             <option value="15">15m</option>
             <option value="25" selected>25m</option>
             <option value="50">50m</option>
@@ -57,8 +59,8 @@
       <p class="fine lock-note">lock in keeps going past your due cards: when the queue runs dry, your weakest material comes back for practice until the clock runs out</p>
       <p class="exam-line mono" id="exam-line" hidden></p>
       <div id="readiness" class="readiness" hidden></div>
-      <div class="load-bars" id="load-bars" title="reviews coming due over the next two weeks"></div>
-      <p class="fine load-caption">the next two weeks</p>
+      <div class="load-bars" id="load-bars" title="reviews coming due over the next two weeks" aria-hidden="true"></div>
+      <p class="fine load-caption" aria-hidden="true">the next two weeks</p>
     </div>
 
     <details class="about panel">
@@ -77,30 +79,31 @@
       practice reps never touch the schedule.</p>
       <p>Keys: <kbd>enter</kbd> submits and continues, <kbd>h</kbd> shows a
       hint, <kbd>1</kbd>&ndash;<kbd>4</kbd> override the grade,
-      <kbd>esc</kbd> ends the session early. Everything is saved in your
-      browser; nothing leaves it.</p>
+      <kbd>esc</kbd> ends the session early, and <kbd>?</kbd> shows the whole
+      map. Everything is saved in your browser, and nothing leaves it unless
+      you turn on sync under stats.</p>
     </details>
   </div>
 
   <div id="today-session" hidden>
     <div class="review">
       <div class="session-top">
-        <div class="progress"><i id="progress-bar"></i></div>
+        <div class="progress" id="progress" role="progressbar" aria-label="session progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="progress-bar"></i></div>
         <button class="ghost" id="undo-btn" title="take back the last answer (u)" hidden>undo</button>
-        <span class="chip lock-chip" id="lock-chip" hidden>25:00</span>
+        <span class="chip lock-chip" id="lock-chip" role="timer" aria-label="lock in time left" hidden>25:00</span>
       </div>
       <div class="panel review-card" id="review-card">
         <div class="review-meta" id="review-meta"></div>
         <div class="prompt" id="prompt"></div>
-        <div class="timer" id="timer"><i></i></div>
+        <div class="timer" id="timer" aria-hidden="true"><i></i></div>
         <div id="answer-area"></div>
-        <p class="parse-note" id="parse-note"></p>
+        <p class="parse-note" id="parse-note" aria-live="polite"></p>
         <div class="hint-row">
           <button class="plain" id="hint-btn">hint</button>
           <span class="hint-text" id="hint-text"></span>
         </div>
         <div class="outcome" id="outcome" hidden>
-          <p class="verdict" id="verdict"></p>
+          <p class="verdict" id="verdict" aria-live="assertive"></p>
           <div class="solution" id="solution"></div>
           <div class="grade-row" id="grade-row">
             <span class="lead">graded</span>
@@ -126,7 +129,7 @@
   </div>
 </section>
 
-<section id="view-cards" hidden>
+<section id="view-cards" aria-label="cards" hidden>
   <div class="toolbar">
     <button class="primary" id="notes-btn">add from notes</button>
     <button class="plain" id="new-card-btn">new card</button>
@@ -134,12 +137,12 @@
     <button class="plain" id="export-deck-btn">export my cards</button>
     <button class="plain" id="share-btn" title="copy a link that carries your cards">share link</button>
     <span class="spacer"></span>
-    <input type="text" id="card-search" placeholder="search cards" autocomplete="off">
+    <input type="search" id="card-search" placeholder="search cards" aria-label="search cards" autocomplete="off">
     <span class="fine" id="card-count"></span>
   </div>
 
   <div class="panel" id="notes-panel" hidden>
-    <p class="eyebrow">add from notes</p>
+    <h2 class="eyebrow">add from notes</h2>
     <div class="editor-grid">
       <div>
         <label for="notes-text">paste your notes &nbsp;<span class="fine" style="text-transform:none;letter-spacing:0">or drop in a .txt / .md file</span></label>
@@ -157,12 +160,12 @@
       <div>
         <label>quick add one card</label>
         <div class="quick-add">
-          <select id="qa-kind">
+          <select id="qa-kind" aria-label="card kind">
             <option value="term">question with a short typed answer</option>
             <option value="explain">explain-back, graded by you</option>
           </select>
-          <input type="text" id="qa-front" placeholder="What enzyme unzips DNA?">
-          <input type="text" id="qa-back" placeholder="helicase (commas separate accepted answers)">
+          <input type="text" id="qa-front" placeholder="What enzyme unzips DNA?" aria-label="question">
+          <input type="text" id="qa-back" placeholder="helicase (commas separate accepted answers)" aria-label="answer">
           <button class="plain" id="qa-add">add card</button>
         </div>
         <div id="ai-status" class="fine" style="margin-top:1rem"></div>
@@ -175,7 +178,7 @@
     </div>
   </div>
   <div class="panel" id="editor" hidden>
-    <p class="eyebrow" id="editor-title">new card</p>
+    <h2 class="eyebrow" id="editor-title">new card</h2>
     <div class="editor-grid">
       <div>
         <label for="ed-name">name</label>
@@ -239,25 +242,25 @@
   </div>
 </section>
 
-<section id="view-skills" hidden>
+<section id="view-skills" aria-label="skills" hidden>
   <div class="panel" id="dump-panel">
-    <p class="eyebrow">brain dump</p>
+    <h2 class="eyebrow">brain dump</h2>
     <div id="dump-setup">
       <p class="note">You get three minutes and a blank page, notes closed.
       Write everything you can summon about one topic. Free recall like this
       beat concept mapping in Karpicke and Blunt's experiments, and it shows
       you what you actually have instead of what feels familiar.</p>
       <p>
-        <select id="dump-skill"></select>
+        <select id="dump-skill" aria-label="topic to dump"></select>
         <button class="primary" id="dump-start">start the clock</button>
       </p>
     </div>
     <div id="dump-live" hidden>
       <div class="session-top">
-        <div class="progress"><i id="dump-bar"></i></div>
-        <span class="chip lock-chip" id="dump-clock">3:00</span>
+        <div class="progress" aria-hidden="true"><i id="dump-bar"></i></div>
+        <span class="chip lock-chip" id="dump-clock" role="timer" aria-label="time left">3:00</span>
       </div>
-      <textarea id="dump-text" rows="10" placeholder="Everything you remember. Full sentences optional."></textarea>
+      <textarea id="dump-text" rows="10" placeholder="Everything you remember. Full sentences optional." aria-label="your brain dump"></textarea>
       <p style="margin-bottom:0"><button class="primary" id="dump-finish">done, show me the cards</button></p>
     </div>
     <div id="dump-review" hidden>
@@ -267,7 +270,7 @@
     </div>
   </div>
   <div class="panel">
-    <p class="eyebrow">skill strength, weakest first</p>
+    <h2 class="eyebrow">skill strength, weakest first</h2>
     <p class="note">Strength is the chance you would get the skill's cards
     right now, from the scheduler's memory model. It decays between reviews,
     which is the point: this list is what to worry about before an exam.</p>
@@ -275,7 +278,7 @@
   </div>
 </section>
 
-<section id="view-stats" hidden>
+<section id="view-stats" aria-label="stats" hidden>
   <div class="stat-chips">
     <div class="panel"><div class="k">streak</div><div class="v" id="st-streak">0 <small>days</small></div></div>
     <div class="panel"><div class="k">reviews</div><div class="v" id="st-total">0</div></div>
@@ -289,24 +292,24 @@
     <div class="panel"><div class="k">streak freezes</div><div class="v" id="st-freezes">0 <small>banked</small></div></div>
   </div>
   <div class="panel">
-    <p class="eyebrow">badges</p>
+    <h2 class="eyebrow">badges</h2>
     <div class="badges" id="badges"></div>
   </div>
   <div class="panel">
-    <p class="eyebrow">the year so far</p>
-    <div class="heatmap" id="heatmap"></div>
+    <h2 class="eyebrow">the year so far</h2>
+    <div class="heatmap" id="heatmap" role="img" aria-label="review calendar"></div>
     <p class="fine" style="margin: 0.7rem 0 0;">every review, one square per day. keep the wall green.</p>
   </div>
   <div class="panel">
-    <p class="eyebrow">reviews per day, last 30</p>
+    <h2 class="eyebrow">reviews per day, last 30</h2>
     <canvas class="chart" id="chart-days"></canvas>
   </div>
   <div class="panel">
-    <p class="eyebrow">coming due, next 14 days</p>
+    <h2 class="eyebrow">coming due, next 14 days</h2>
     <canvas class="chart" id="chart-due"></canvas>
   </div>
   <div class="panel">
-    <p class="eyebrow">sync between devices</p>
+    <h2 class="eyebrow">sync between devices</h2>
     <div id="sync-setup">
       <p class="note">Optional. Your reviews and cards sync through a free
       Supabase project that you own; this app has no server of its own. The
@@ -349,14 +352,14 @@
     <p class="fine" id="sync-status" style="margin: 0.7rem 0 0;"></p>
   </div>
   <div class="panel">
-    <p class="eyebrow">exam dates</p>
+    <h2 class="eyebrow">exam dates</h2>
     <p class="note">Give a deck an exam date and nothing in it gets scheduled past
     that day: reviews bunch up as the exam approaches instead of drifting
     beyond it. The today page counts down.</p>
     <div class="settings-row" id="exam-settings"></div>
   </div>
   <div class="panel">
-    <p class="eyebrow">settings</p>
+    <h2 class="eyebrow">settings</h2>
     <div class="settings-row">
       <div>
         <label for="set-new">new cards per day</label>
@@ -373,6 +376,10 @@
         </select>
       </div>
       <div>
+        <label for="set-cozy">easier reading</label>
+        <label class="check"><input type="checkbox" id="set-cozy"> plain font, wider spacing</label>
+      </div>
+      <div>
         <label for="set-key">anthropic api key, for drafting cards from notes</label>
         <input type="password" id="set-key" placeholder="sk-ant-..." autocomplete="off">
       </div>
@@ -386,10 +393,10 @@
 
 </main>
 
-<div id="toast"></div>
-<div id="keys-overlay" hidden>
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="keys-overlay" role="dialog" aria-modal="true" aria-label="keyboard shortcuts" hidden>
   <div class="keys-card">
-    <p class="eyebrow">keys</p>
+    <h2 class="eyebrow">keys</h2>
     <table class="keys">
       <tr><td><kbd>enter</kbd></td><td>check the answer, then next card</td></tr>
       <tr><td><kbd>space</kbd></td><td>reveal the next step, then next card</td></tr>
