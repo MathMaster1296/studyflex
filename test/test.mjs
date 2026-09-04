@@ -3,13 +3,13 @@
 // and checking, the session queue, and the integrity of every card
 // in the shipped deck.
 
-import { parse, evaluate, evalIn, equivalent, stripConstant } from '../js/expr.js';
+import { parse, evaluate, evalIn, equivalent, stripConstant, toTex } from '../js/expr.js';
 import * as fsrs from '../js/fsrs.js';
 import { rng } from '../js/rng.js';
 import { draw, fill, check, validate, textMatch, clozeSpans, renderCloze } from '../js/template.js';
 import { defaultState, load, streak, dayOf, shareEncode, shareDecode } from '../js/store.js';
 import { buildQueue, gradeFor, Session, LEECH_LAPSES, interleave } from '../js/session.js';
-import { applyFreezes, streakWithFreezes, earnFreezes, longestStreak, checkBadges, BADGES, FREEZE_CAP } from '../js/gamify.js';
+import { applyFreezes, streakWithFreezes, earnFreezes, longestStreak, checkBadges, BADGES, FREEZE_CAP, examReadiness } from '../js/gamify.js';
 import { createSync, applyStateDoc, applyTombs, stateDoc } from '../js/sync.js';
 import { rebuildSrs } from '../js/store.js';
 import { startMock } from './mock-supabase.mjs';
@@ -63,6 +63,24 @@ ok(!equivalent('sin(a*x)/a', 'x', { vars: ['x'], env: { a: 2 }, upToConstant: tr
 ok(!equivalent('1/x', 'x', { vars: ['x'], rand: rng(11) }), 'different functions differ');
 ok(equivalent('a/cos(a*x)^2', 'a*sec(a*x)^2', { vars: ['x'], env: { a: 3 }, domain: [-0.25, 0.25], rand: rng(12) }),
   'sec form equals 1/cos form');
+
+// ---------- rendering typed input back as TeX ----------
+
+{
+  const tex = (src, scope = ['x']) => toTex(parse(src, scope));
+  ok(tex('12x^3') === '12\\,x^{3}', 'coefficient and power');
+  ok(tex('1/2') === '\\frac{1}{2}', 'fractions render as fractions');
+  ok(tex('sqrt(2)/2') === '\\frac{\\sqrt{2}}{2}', 'roots inside fractions');
+  ok(tex('sin(3x)') === '\\sin\\left(3\\,x\\right)', 'functions get their TeX names');
+  ok(tex('-x^2') === '-x^{2}', 'negation binds outside the power');
+  ok(tex('(x+1)^2') === '\\left(x + 1\\right)^{2}', 'grouped base keeps its parens');
+  ok(tex('2*3') === '2 \\cdot 3', 'number times number shows the dot');
+  ok(tex('pi/6', []) === '\\frac{\\pi}{6}', 'pi becomes the symbol');
+  ok(tex('x^-2') === 'x^{-2}', 'negative exponents stay attached');
+  const p = { a: 3, n: 4, an: 12, nm1: 3 };
+  ok(check(calc1.templates.find(t => t.id === 'calc1/power-rule'), p, '12x^3').ok,
+    'what the preview shows is what the checker reads');
+}
 
 // ---------- fsrs ----------
 
@@ -272,6 +290,39 @@ for (const deck of [calc1, techniques]) {
   ok(!s1.items.some(i => i.graded), 'undo removes the practice requeue');
 
   ok(LEECH_LAPSES >= 3, 'leech threshold is not hair-trigger');
+}
+
+// ---------- step cards, small sessions, readiness ----------
+
+{
+  const steps = calc1.templates.find(t => t.id === 'calc1/parts-twice');
+  ok(steps.answer.type === 'steps' && steps.answer.steps.length === 3, 'step card ships with steps');
+  ok(check(steps, draw(steps, 1), 'yes').ok, 'steps grade like self cards');
+  const broken = { ...steps, id: 'x', answer: { type: 'steps', steps: [] } };
+  ok(validate(broken).length > 0, 'empty steps list is rejected');
+
+  const state = load([calc1], null);
+  const now = Date.parse('2026-10-01T10:00:00');
+  const five = new Session(state, now, { cap: 5 });
+  ok(five.remaining === 5, 'just-five caps the queue');
+
+  for (const id of ['calc1/power-rule', 'calc1/chain-sin', 'calc1/chain-power']) {
+    state.templates[id].srs = fsrs.schedule(fsrs.newState(), fsrs.GOOD, now - 5 * 86400000);
+  }
+  const drill = new Session(state, now, { practiceSkill: 'chain rule', cap: 10 });
+  ok(drill.remaining === 2, 'drill takes only the seen cards of that skill');
+  ok(drill.items.every(i => i.graded && i.extra), 'drill reps are practice');
+  drill.answer(true, 9000, 0, fsrs.GOOD, now);
+  ok(['calc1/power-rule', 'calc1/chain-sin', 'calc1/chain-power']
+    .every(id => state.templates[id].srs.reps === 1), 'drilling never touches the schedule');
+
+  state.settings.exams = { calc1: now + 10 * 86400000 };
+  const r = examReadiness(state, now);
+  ok(r.length === 1 && r[0].deckId === 'calc1', 'readiness reports the deck with an exam');
+  ok(r[0].seen === 3 && r[0].unseen === calc1.templates.length - 3, 'readiness splits seen from untouched');
+  ok(r[0].ready > 0 && r[0].ready < 1, 'predicted exam-day recall is a probability');
+  const sooner = examReadiness({ ...state, settings: { ...state.settings, exams: { calc1: now + 86400000 } } }, now);
+  ok(sooner[0].ready > r[0].ready, 'a nearer exam predicts better recall than a farther one');
 }
 
 // ---------- interleaving ----------

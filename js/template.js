@@ -174,7 +174,7 @@ export function check(template, params, input) {
     if (a.type === 'choice') {
       return { ok: Number(input) === a.correct };
     }
-    if (a.type === 'self') {
+    if (a.type === 'self' || a.type === 'steps') {
       return { ok: input === 'yes' };
     }
     return { error: `unknown answer type "${a.type}"` };
@@ -254,6 +254,10 @@ export function validate(template) {
         if (spans.some(s => !s.trim())) return ['empty [[span]] in cloze prompt'];
         const r = check(template, params, spans[params._cloze]);
         if (!r.ok) return [`seed ${seed}: cloze span fails its own check`];
+      } else if (a.type === 'steps') {
+        if (!Array.isArray(a.steps) || !a.steps.length) return ['steps answer needs a steps list'];
+        if (a.steps.some(s => !String(s).trim())) return ['empty step in steps list'];
+        for (const s of a.steps) fill(s, params);
       } else if (a.type !== 'self') {
         return [`unknown answer type "${a.type}"`];
       }

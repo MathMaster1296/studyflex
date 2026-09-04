@@ -53,10 +53,22 @@ export function gradeFor(ok, ms, hints, par) {
 export const LEECH_LAPSES = 4;
 
 export class Session {
-  constructor(state, now) {
-    const { queue } = buildQueue(state, now);
+  // opts.cap trims the queue for a low-effort day ("just five");
+  // opts.practiceSkill ignores the schedule entirely and drills one
+  // skill's seen cards as practice, weakest first.
+  constructor(state, now, opts = {}) {
     this.state = state;
-    this.items = queue.map(e => ({ entry: e, graded: false }));
+    if (opts.practiceSkill) {
+      const pool = Object.values(state.templates)
+        .filter(e => !e.suspended && !isNew(e.srs) && e.tpl.skills.includes(opts.practiceSkill))
+        .sort((a, b) => retrievability(a.srs, now) - retrievability(b.srs, now))
+        .slice(0, opts.cap || 10);
+      this.items = pool.map(e => ({ entry: e, graded: true, extra: true }));
+    } else {
+      const { queue } = buildQueue(state, now);
+      this.items = queue.slice(0, opts.cap || queue.length)
+        .map(e => ({ entry: e, graded: false }));
+    }
     this.done = [];
     this.results = []; // {id, ok, ms, hints, grade, practice}
     this.startedAt = now;

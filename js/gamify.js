@@ -3,6 +3,7 @@
 // state is the freeze bank and which badges have been celebrated.
 
 import { dayOf } from './store.js';
+import { isNew, retrievability } from './fsrs.js';
 
 const DAY = 86400000;
 export const FREEZE_CAP = 2;
@@ -68,6 +69,32 @@ export function longestStreak(state) {
     prev = t;
   }
   return best;
+}
+
+// ---------- exam readiness ----------
+
+// For every deck with a future exam: the mean predicted recall on
+// exam day across its studied cards, straight from the memory model.
+// The honest number, not the vibes number.
+export function examReadiness(state, now) {
+  const out = [];
+  for (const [deckId, exam] of Object.entries(state.settings.exams || {})) {
+    if (exam <= now) continue;
+    let sum = 0, seen = 0, unseen = 0;
+    for (const e of Object.values(state.templates)) {
+      if (e.deckId !== deckId || e.suspended) continue;
+      if (isNew(e.srs)) { unseen++; continue; }
+      sum += retrievability(e.srs, exam);
+      seen++;
+    }
+    out.push({
+      deckId, exam,
+      days: Math.ceil((exam - now) / DAY),
+      ready: seen ? sum / seen : 0,
+      seen, unseen,
+    });
+  }
+  return out.sort((a, b) => a.exam - b.exam);
 }
 
 // ---------- badges ----------

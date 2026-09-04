@@ -231,3 +231,53 @@ export function equivalent(refSrc, userSrc, opts = {}) {
 export function stripConstant(src) {
   return src.replace(/[+-]\s*C\s*$/i, '').trim();
 }
+
+// ---------- rendering what the parser understood ----------
+
+const TEX_FNS = {
+  sin: '\\sin', cos: '\\cos', tan: '\\tan', sec: '\\sec', csc: '\\csc', cot: '\\cot',
+  asin: '\\arcsin', acos: '\\arccos', atan: '\\arctan',
+  arcsin: '\\arcsin', arccos: '\\arccos', arctan: '\\arctan',
+  sinh: '\\sinh', cosh: '\\cosh', tanh: '\\tanh',
+  ln: '\\ln', log: '\\ln', log10: '\\log_{10}', log2: '\\log_{2}', exp: '\\exp',
+};
+const TEX_NAMES = { pi: '\\pi', tau: '\\tau' };
+
+// Precedence: + - (1), * / (2), unary minus (3), ^ (4), atoms (5).
+function prec(node) {
+  if (node.t === 'bin') return node.op === '^' ? 4 : node.op === '+' || node.op === '-' ? 1 : 2;
+  if (node.t === 'neg') return 3;
+  return 5;
+}
+
+function wrap(node, min) {
+  const s = toTex(node);
+  return prec(node) < min ? `\\left(${s}\\right)` : s;
+}
+
+// AST to LaTeX, so the answer box can echo back the math it read.
+export function toTex(node) {
+  switch (node.t) {
+    case 'num': return Number.isInteger(node.v) ? String(node.v) : String(node.v);
+    case 'name': return TEX_NAMES[node.v] || node.v;
+    case 'neg': return `-${wrap(node.a, 4)}`;
+    case 'fn':
+      if (node.f === 'sqrt') return `\\sqrt{${toTex(node.a)}}`;
+      if (node.f === 'abs') return `\\left|${toTex(node.a)}\\right|`;
+      return `${TEX_FNS[node.f] || node.f}\\left(${toTex(node.a)}\\right)`;
+    case 'bin': {
+      switch (node.op) {
+        case '+': return `${wrap(node.a, 1)} + ${wrap(node.b, 2)}`;
+        case '-': return `${wrap(node.a, 1)} - ${wrap(node.b, 2)}`;
+        case '/': return `\\frac{${toTex(node.a)}}{${toTex(node.b)}}`;
+        case '^': return `${wrap(node.a, 5)}^{${toTex(node.b)}}`;
+        case '*': {
+          // numbers side by side need a dot; everything else juxtaposes
+          const dot = node.b.t === 'num' ||
+            (node.b.t === 'bin' && node.b.op === '*' && node.b.a.t === 'num');
+          return `${wrap(node.a, 2)}${dot ? ' \\cdot ' : '\\,'}${wrap(node.b, 3)}`;
+        }
+      }
+    }
+  }
+}
