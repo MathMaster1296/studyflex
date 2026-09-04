@@ -25,7 +25,9 @@ negotiation, and the lazy answer compounds into a schedule built on wishful
 thinking. StudyFlex checks your actual answer and grades from what happened:
 wrong is again, right but slow or with a hint is hard, right and quick is
 easy. You can override before moving on, but the starting point is always
-what the clock and the checker saw.
+what the clock and the checker saw. While you type a math answer, the box
+echoes back the expression the checker will read, rendered properly, so
+"did it understand my caret" is never a question.
 
 ## How answers are checked
 
@@ -51,6 +53,18 @@ Karpicke and Blunt's 2011 experiments, and it audits your memory instead of
 your feelings about it.
 
 ## Locking in
+
+Derivations get step cards: work each move on paper, reveal the reference
+step, and compare, one move at a time, then grade the whole thing
+honestly. The calculus deck ships two: integration by parts applied twice,
+and the logarithmic differentiation of x^x.
+
+For low days there is a just-five button, because five cards beat zero
+cards and usually turn into more. Every skill row has a drill button that
+practices that one skill on demand without touching the schedule. And with
+an exam date set, the today page shows readiness: your predicted recall on
+exam day, per deck, computed from the memory model as if you stopped
+studying now. It is the honest number, and watching it climb is the point.
 
 The lock in button puts a clock on the session: 15, 25, or 50 minutes.
 Reviews run as normal, and when the due queue runs dry with time left, the
@@ -144,8 +158,9 @@ there is no server of mine at all.
 Cards are small JSON templates. Parameters draw from ranges (`int`, `float`),
 lists (`pick`), or expressions over earlier parameters (`computed`), and
 `{{a}}` slots drop them into the prompt's LaTeX. Answers are a `number`, an
-`expression` with declared variables, a multiple `choice`, or `self` for
-derivations you grade yourself. Saving a card draws it 100 times and makes
+`expression` with declared variables, a multiple `choice`, `steps` for
+derivations revealed one move at a time, or `self` for anything you grade
+yourself. Press ? anywhere for the keyboard map. Saving a card draws it 100 times and makes
 the reference answer pass its own checker, so a card that cannot grade
 itself never reaches a session. The card editor has a live preview and the
 full format reference.

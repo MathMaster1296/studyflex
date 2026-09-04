@@ -44,6 +44,7 @@
       <p class="counts"><b id="n-due">0</b> due &nbsp;·&nbsp; <b id="n-new">0</b> new</p>
       <div class="start-row">
         <button class="primary" id="start-btn">start reviewing</button>
+        <button class="plain" id="five-btn" title="a tiny session for a low day: five cards, streak intact">just five</button>
         <span class="lock-group">
           <button class="plain" id="lock-btn">lock in</button>
           <select id="lock-mins" title="minutes on the clock">
@@ -55,6 +56,7 @@
       </div>
       <p class="fine lock-note">lock in keeps going past your due cards: when the queue runs dry, your weakest material comes back for practice until the clock runs out</p>
       <p class="exam-line mono" id="exam-line" hidden></p>
+      <div id="readiness" class="readiness" hidden></div>
       <div class="load-bars" id="load-bars" title="reviews coming due over the next two weeks"></div>
       <p class="fine load-caption">the next two weeks</p>
     </div>
@@ -283,6 +285,7 @@
   <div class="stat-chips">
     <div class="panel"><div class="k">longest streak</div><div class="v" id="st-longest">0 <small>days</small></div></div>
     <div class="panel"><div class="k">best day</div><div class="v" id="st-best">0 <small>reviews</small></div></div>
+    <div class="panel"><div class="k">locked in</div><div class="v" id="st-focus">0 <small>min</small></div></div>
     <div class="panel"><div class="k">streak freezes</div><div class="v" id="st-freezes">0 <small>banked</small></div></div>
   </div>
   <div class="panel">
@@ -377,13 +380,28 @@
       <div><button class="plain" id="import-all-btn">restore from export</button></div>
       <div><button class="plain danger" id="wipe-btn">erase all data</button></div>
     </div>
-    <p class="fine" style="margin-top: 0.9rem;">everything lives in this browser's local storage. export before switching machines.</p>
+    <p class="fine" style="margin-top: 0.9rem;">everything lives in this browser's local storage. <span id="backup-line"></span></p>
   </div>
 </section>
 
 </main>
 
 <div id="toast"></div>
+<div id="keys-overlay" hidden>
+  <div class="keys-card">
+    <p class="eyebrow">keys</p>
+    <table class="keys">
+      <tr><td><kbd>enter</kbd></td><td>check the answer, then next card</td></tr>
+      <tr><td><kbd>space</kbd></td><td>reveal the next step, then next card</td></tr>
+      <tr><td><kbd>h</kbd></td><td>hint</td></tr>
+      <tr><td><kbd>1</kbd>&ndash;<kbd>4</kbd></td><td>override the grade</td></tr>
+      <tr><td><kbd>a</kbd>&ndash;<kbd>d</kbd></td><td>pick a choice</td></tr>
+      <tr><td><kbd>u</kbd></td><td>take back the last answer</td></tr>
+      <tr><td><kbd>esc</kbd></td><td>end the session</td></tr>
+      <tr><td><kbd>?</kbd></td><td>this card</td></tr>
+    </table>
+  </div>
+</div>
 <input type="file" id="file-input" accept="application/json" hidden>
 
 <footer>

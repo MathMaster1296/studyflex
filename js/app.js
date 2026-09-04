@@ -5,6 +5,7 @@ import { deck as calc1 } from './decks/calc1.js';
 import { deck as techniques } from './decks/techniques.js';
 import * as fsrs from './fsrs.js';
 import { draw, fill, check, referenceText, validate, renderCloze, isProse } from './template.js';
+import { parse, toTex, stripConstant } from './expr.js';
 import { load, save, exportJSON, importJSON, defaultState, dayOf, streak, shareEncode, shareDecode, rebuildSrs } from './store.js';
 import { createSync, applyStateDoc } from './sync.js';
 
@@ -17,7 +18,7 @@ function addTombs(logs) {
 import { Session, buildQueue, gradeFor, LEECH_LAPSES } from './session.js';
 import { randomSeed } from './rng.js';
 import { confetti } from './fx.js';
-import { applyFreezes, streakWithFreezes, earnFreezes, longestStreak, checkBadges, BADGES, FREEZE_EVERY } from './gamify.js';
+import { applyFreezes, streakWithFreezes, earnFreezes, longestStreak, checkBadges, BADGES, FREEZE_EVERY, examReadiness } from './gamify.js';
 
 const SEED_DECKS = [calc1, techniques];
 const $ = id => document.getElementById(id);
@@ -233,6 +234,7 @@ function renderIdle() {
   const none = due.length + fresh.length === 0;
   const seen = Object.values(state.templates).some(e => !e.suspended && !fsrs.isNew(e.srs));
   $('start-btn').disabled = none;
+  $('five-btn').disabled = none;
   $('lock-btn').disabled = none && !seen;
   const reviewDays = state.logs.filter(l => l.id && !l.practice).map(l => l.t);
   const lastReview = reviewDays.length ? Math.max(...reviewDays) : 0;
@@ -264,7 +266,28 @@ function renderIdle() {
     bars.appendChild(b);
   });
   renderExamLine(now);
+  renderReadiness(now);
   renderStreak();
+}
+
+// Predicted recall on exam day if you stopped studying now, per deck
+// with an exam date. Reviews between now and then only raise it.
+function renderReadiness(now) {
+  const box = $('readiness');
+  box.innerHTML = '';
+  const rows = examReadiness(state, now);
+  box.hidden = !rows.length;
+  for (const r of rows) {
+    const pct = Math.round(r.ready * 100);
+    const cls = r.ready < 0.7 ? 'weak' : r.ready < 0.85 ? 'mid' : '';
+    const div = document.createElement('div');
+    div.className = 'skill-row';
+    div.innerHTML = `
+      <span class="skill-name">${esc(deckName(r.deckId))}</span>
+      <span class="meter ${cls}"><i style="width:${pct}%"></i></span>
+      <span class="mono">${pct}% on exam day${r.unseen ? ` · ${r.unseen} untouched` : ''}</span>`;
+    box.appendChild(div);
+  }
 }
 
 function deckName(id) {
@@ -298,8 +321,8 @@ const ui = {
   lockTicker: 0,
 };
 
-function startSession(lockMins = 0) {
-  session = new Session(state, Date.now());
+function startSession(lockMins = 0, opts = {}) {
+  session = new Session(state, Date.now(), opts);
   ui.lockUntil = lockMins ? Date.now() + lockMins * 60000 : 0;
   if (!session.remaining && ui.lockUntil) session.refill(Date.now());
   if (!session.remaining) return;
@@ -430,6 +453,39 @@ function showCard() {
     b.textContent = 'show answer';
     b.addEventListener('click', reveal);
     area.append(p, b);
+  } else if (a.type === 'steps') {
+    ui.stepIdx = 0;
+    const p = document.createElement('p');
+    p.className = 'note';
+    p.textContent = 'Do the step on paper first, then check it against the reveal.';
+    const list = document.createElement('div');
+    list.id = 'steps-list';
+    const b = document.createElement('button');
+    b.className = 'primary';
+    b.id = 'step-btn';
+    b.textContent = 'check my first step';
+    b.addEventListener('click', revealStep);
+    area.append(p, list, b);
+  }
+
+  // echo back the math the checker will read, as it is typed
+  const input = $('answer-input');
+  if (input && (a.type === 'number' || a.type === 'expression')) {
+    const preview = document.createElement('div');
+    preview.className = 'input-preview';
+    input.closest('.answer-row').after(preview);
+    const scope = a.type === 'expression'
+      ? [...(a.vars || []), ...Object.keys(ui.drawn).filter(p => typeof ui.drawn[p] === 'number')]
+      : [];
+    input.addEventListener('input', () => {
+      const raw = a.upToConstant ? stripConstant(input.value) : input.value;
+      $('parse-note').textContent = '';
+      try {
+        preview.innerHTML = raw.trim()
+          ? katex.renderToString(toTex(parse(raw, scope)), { throwOnError: false })
+          : '';
+      } catch { preview.innerHTML = ''; }
+    });
   }
 
   ui.startedAt = Date.now();
@@ -488,6 +544,24 @@ function reveal() {
   finishAnswer(null); // self-graded: verdict comes from the grade keys
 }
 
+function revealStep() {
+  if (ui.phase !== 'answering') return;
+  const tpl = session.current.entry.tpl;
+  const steps = tpl.answer.steps;
+  const row = document.createElement('div');
+  row.className = 'step-row session-card-enter';
+  row.innerHTML = `<span class="mono step-n">${ui.stepIdx + 1}</span><div>${mathHTML(fill(steps[ui.stepIdx], ui.drawn))}</div>`;
+  $('steps-list').appendChild(row);
+  ui.stepIdx++;
+  const btn = $('step-btn');
+  if (ui.stepIdx >= steps.length) {
+    btn.hidden = true;
+    finishAnswer(null);
+  } else {
+    btn.textContent = `check step ${ui.stepIdx + 1}`;
+  }
+}
+
 function finishAnswer(ok) {
   clearInterval(ui.timerId);
   const tpl = session.current.entry.tpl;
@@ -496,6 +570,7 @@ function finishAnswer(ok) {
 
   const selfGraded = ok === null;
   ui.ok = selfGraded ? true : ok;
+  ui.selfGraded = selfGraded;
   ui.grade = selfGraded ? 0 : gradeFor(ok, ms, ui.hintsUsed, tpl.par || 60);
 
   const verdict = $('verdict');
@@ -509,7 +584,7 @@ function finishAnswer(ok) {
 
   let solution = '';
   const ref = referenceText(tpl, ui.drawn);
-  if (ref && tpl.answer.type !== 'choice' && tpl.answer.type !== 'self') {
+  if (ref && !['choice', 'self', 'steps'].includes(tpl.answer.type)) {
     solution += isProse(tpl)
       ? `<p>Answer: <b>${esc(ref)}</b></p>`
       : `<p>Answer: ${mathInline(ref)}</p>`;
@@ -532,7 +607,7 @@ function finishAnswer(ok) {
 
 function pickGrade(g) {
   if (ui.phase !== 'graded') return;
-  const selfType = session.current.entry.tpl.answer.type === 'self';
+  const selfType = ui.selfGraded;
   if (ui.practice && !selfType) return;
   ui.grade = g;
   if (selfType) ui.ok = g >= 2;
@@ -610,6 +685,7 @@ function endSession() {
 }
 
 $('start-btn').addEventListener('click', () => startSession(0));
+$('five-btn').addEventListener('click', () => startSession(0, { cap: 5 }));
 $('lock-btn').addEventListener('click', () => startSession(Number($('lock-mins').value)));
 $('undo-btn').addEventListener('click', undoLast);
 $('back-btn').addEventListener('click', renderIdle);
@@ -630,10 +706,11 @@ document.querySelectorAll('.grade').forEach(b =>
 document.addEventListener('keydown', ev => {
   if (!session) return;
   const typing = ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA';
-  if (ev.key === 'Enter' || ev.keyCode === 13) {
+  if (ev.key === 'Enter' || ev.keyCode === 13 || (ev.key === ' ' && !typing)) {
     if (ui.phase === 'answering') {
       const tpl = session.current.entry.tpl;
       if (tpl.answer.type === 'self') reveal();
+      else if (tpl.answer.type === 'steps') revealStep();
       else if (typing) submit();
       ev.preventDefault();
     } else if (ui.phase === 'graded') {
@@ -643,7 +720,10 @@ document.addEventListener('keydown', ev => {
     return;
   }
   if (typing) return;
-  if (ev.key === 'Escape') { endSession(); return; }
+  if (ev.key === 'Escape') {
+    if ($('keys-overlay').hidden) endSession(); // else Escape just closes the overlay
+    return;
+  }
   if (ev.key === 'h' && ui.phase === 'answering') { $('hint-btn').click(); return; }
   if (ev.key === 'u' && ui.phase === 'answering') { undoLast(); return; }
   if (ui.phase === 'graded' && '1234'.includes(ev.key)) {
@@ -920,7 +1000,19 @@ $('export-all-btn').addEventListener('click', () => {
   // backups travel between machines; the API key stays in this browser
   const clean = { ...state, settings: { ...state.settings, apiKey: undefined } };
   download(`studyflex-backup-${dayOf(Date.now())}.json`, exportJSON(clean));
+  state.settings.lastExportAt = Date.now();
+  persist();
+  renderStats();
 });
+
+// ---------- keyboard help ----------
+
+document.addEventListener('keydown', ev => {
+  if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA') return;
+  if (ev.key === '?') $('keys-overlay').hidden = !$('keys-overlay').hidden;
+  else if (ev.key === 'Escape') $('keys-overlay').hidden = true;
+});
+$('keys-overlay').addEventListener('click', () => { $('keys-overlay').hidden = true; });
 $('wipe-btn').addEventListener('click', () => {
   if (!confirm('Erase every card, edit, and review? Exports are the only way back.')) return;
   state = load(SEED_DECKS, { getItem: () => null, setItem: () => {} });
@@ -1189,6 +1281,17 @@ function renderSkills() {
       <span class="skill-name">${esc(r.name)}</span>
       <span class="meter ${cls}"><i style="width:${pct}%"></i></span>
       <span class="mono">${label}</span>`;
+    if (r.strength !== null) {
+      const drill = document.createElement('button');
+      drill.className = 'plain';
+      drill.textContent = 'drill';
+      drill.title = 'practice this skill now; the schedule is not touched';
+      drill.addEventListener('click', () => {
+        location.hash = '#today';
+        startSession(0, { practiceSkill: r.name, cap: 10 });
+      });
+      div.appendChild(drill);
+    }
     list.appendChild(div);
   }
 }
@@ -1239,6 +1342,10 @@ function renderStats() {
   for (const l of graded) byDay[dayOf(l.t)] = (byDay[dayOf(l.t)] || 0) + 1;
   $('st-longest').innerHTML = `${longestStreak(state)} <small>days</small>`;
   $('st-best').innerHTML = `${Math.max(0, ...Object.values(byDay))} <small>reviews</small>`;
+  const focused = state.logs.reduce((a, l) => a + (l.lock || 0), 0);
+  $('st-focus').innerHTML = focused >= 90
+    ? `${(focused / 60).toFixed(1)} <small>hours</small>`
+    : `${focused} <small>min</small>`;
   $('st-freezes').innerHTML = `${state.gamify.freezes} <small>banked</small>`;
   $('st-freezes').title = `earn one per ${FREEZE_EVERY} streak days; a freeze quietly covers a missed day`;
 
@@ -1276,6 +1383,14 @@ function renderStats() {
   $('set-new').value = state.settings.newPerDay;
   $('set-ret').value = String(state.settings.retention);
   $('set-key').value = state.settings.apiKey || '';
+
+  const last = state.settings.lastExportAt;
+  const syncedUp = syncer && syncer.user();
+  $('backup-line').textContent = syncedUp
+    ? 'sync is on; exports are belt and suspenders.'
+    : last
+      ? `last full export: ${Math.floor((now - last) / DAY)} days ago.`
+      : 'no full export yet. one file, and a lost laptop costs you nothing.';
 }
 
 $('set-key').addEventListener('change', () => {
